@@ -57,7 +57,6 @@ public class MainFrame extends JFrame {
     private JToggleButton jtbModeEllipseShape;
     private JToggleButton jtbSmartTools;
     private JToggleButton jtbAutoCollision;
-    private JButton jbGlobalEdit;
     private JButton jbCopySelection;
     private JButton jbCutSelection;
     private JButton jbPasteSelection;
@@ -76,6 +75,7 @@ public class MainFrame extends JFrame {
     private JMenuItem jmiReplaceRemap;
     private JLabel jlCursorCoordsTitle;
     private JLabel jlCursorCoords;
+    private GlobalMapEditDialog globalMapEditor;
 
     public static void main(String[] args) {
         try {
@@ -238,15 +238,9 @@ public class MainFrame extends JFrame {
         jtbAutoCollision.addActionListener(e ->
                 mapDisplay.setAutoCollisionEnabled(jtbAutoCollision.isSelected()));
         applyToolButtonBackground(jtbAutoCollision);
-        jbGlobalEdit = new JButton("Global Edit...");
-        jbGlobalEdit.setFocusable(false);
-        jbGlobalEdit.setMargin(new Insets(2, 4, 2, 4));
-        jbGlobalEdit.setToolTipText("Replace tiles or edit layers across highlighted matrix chunks");
-        jbGlobalEdit.addActionListener(e -> openGlobalMapEditor());
-        applyToolButtonBackground(jbGlobalEdit);
 
         //Rebuild the tools toolbar as compact two column groups separated by
-        //thin lines: draw / select / clipboard / fill-shape
+        //thin lines: draw / select / clipboard / fill-shape / camera / layer
         toolGroupWidth = 0;
         jtTools.removeAll();
         jtTools.setLayout(new BoxLayout(jtTools, BoxLayout.Y_AXIS));
@@ -275,35 +269,11 @@ public class MainFrame extends JFrame {
 
         addToolGroup(2, jtbModeEdit, jtbModeClear, jtbModeSmartPaint, jtbModeInvSmartPaint);
         addToolGroup(2, jtbModeSelect, jtbModeLasso, jtbModeWand, jtbModeMoveSelect);
-        addDeselectRow();
         addSelectionActionGroup();
         addToolGroup(2, jtbModeBucket, jtbModePicker, jtbModeLine, jtbModeRectShape, jtbModeEllipseShape);
+        addToolGroup(2, jtbModeMove, jtbModeZoom, jbFitCameraToMap);
+        addToolGroup(1, jbMoveLayerUp, jbMoveLayerDown);
         addSmartToolsToolbarHeader();
-
-        //Camera controls live in the View group next to the view toggles,
-        //compacted into a two column grid; separators split the mutually
-        //exclusive view modes, the display toggles, and the camera tools
-        jtView.removeAll();
-        jtView.setLayout(new MigLayout("insets 0, gap 2 2, wrap 2", "[fill][fill]"));
-        jtView.add(jtbView3D);
-        jtView.add(jtbViewOrtho);
-        jtView.add(jtbViewHeight);
-        jtView.add(new JSeparator(), "newline, span 2, growx");
-        jtView.add(jtbViewGrid, "newline");
-        jtView.add(jtbViewWireframe);
-        jtView.add(new JSeparator(), "newline, span 2, growx");
-        jtView.add(jtbModeMove, "newline");
-        jtView.add(jtbModeZoom);
-        jtView.add(jbFitCameraToMap, "newline, span 2, growx");
-
-        //Layer up / down buttons sit at the bottom of the layer selector
-        JPanel jpLayerArrows = new JPanel(new GridLayout(1, 2, 2, 0));
-        jpLayerArrows.setOpaque(false);
-        jpLayerArrows.add(jbMoveLayerUp);
-        jpLayerArrows.add(jbMoveLayerDown);
-        jpLayer.setLayout(new BorderLayout());
-        jpLayer.add(thumbnailLayerSelector, BorderLayout.CENTER);
-        jpLayer.add(jpLayerArrows, BorderLayout.SOUTH);
 
         //Edit menu entries for the region selection
         jmiSelectAll = new JMenuItem("Select All");
@@ -398,8 +368,7 @@ public class MainFrame extends JFrame {
     private void addSmartToolsToolbarHeader() {
         int headerWidth = Math.max(toolGroupWidth, Math.max(
                 jtbSmartTools.getPreferredSize().width,
-                Math.max(jtbAutoCollision.getPreferredSize().width,
-                        jbGlobalEdit.getPreferredSize().width)));
+                jtbAutoCollision.getPreferredSize().width));
         if (headerWidth > toolGroupWidth) {
             for (Component component : jtTools.getComponents()) {
                 if (component instanceof JPanel) {
@@ -415,11 +384,9 @@ public class MainFrame extends JFrame {
         panel.setOpaque(false);
         panel.add(jtbSmartTools);
         panel.add(jtbAutoCollision);
-        panel.add(jbGlobalEdit);
         Dimension pref = new Dimension(toolGroupWidth,
                 jtbSmartTools.getPreferredSize().height
-                        + jtbAutoCollision.getPreferredSize().height
-                        + jbGlobalEdit.getPreferredSize().height + 4);
+                        + jtbAutoCollision.getPreferredSize().height + 2);
         panel.setPreferredSize(pref);
         panel.setMaximumSize(pref);
         panel.setAlignmentX(0.0f);
@@ -439,7 +406,14 @@ public class MainFrame extends JFrame {
                     "Global Map Editor", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        new GlobalMapEditDialog(this, handler).setVisible(true);
+        if (globalMapEditor != null && globalMapEditor.isDisplayable()) {
+            globalMapEditor.setVisible(true);
+            globalMapEditor.toFront();
+            globalMapEditor.requestFocus();
+            return;
+        }
+        globalMapEditor = new GlobalMapEditDialog(this, handler);
+        globalMapEditor.setVisible(true);
     }
 
     /** Adds a group of tool buttons to jtTools as a compact column block. */
@@ -479,21 +453,6 @@ public class MainFrame extends JFrame {
     }
 
     /** Four clipboard buttons followed by a full-width Deselect command. */
-    /** Full width Deselect row glued under the selection tools group. */
-    private void addDeselectRow() {
-        jbDeselect.setMargin(new Insets(2, 4, 2, 4));
-        applyToolButtonBackground(jbDeselect);
-        JPanel panel = new JPanel(new GridLayout(1, 1));
-        panel.setOpaque(false);
-        panel.add(jbDeselect);
-        Dimension pref = new Dimension(toolGroupWidth, jbDeselect.getPreferredSize().height + 2);
-        panel.setPreferredSize(pref);
-        panel.setMaximumSize(pref);
-        panel.setAlignmentX(0.0f);
-        jtTools.add(Box.createVerticalStrut(2));
-        jtTools.add(panel);
-    }
-
     private void addSelectionActionGroup() {
         if (jtTools.getComponentCount() > 0) {
             jtTools.add(Box.createVerticalStrut(3));
@@ -521,6 +480,13 @@ public class MainFrame extends JFrame {
             gbc.gridwidth = 1;
             panel.add(button, gbc);
         }
+        jbDeselect.setMargin(new Insets(2, 4, 2, 4));
+        applyToolButtonBackground(jbDeselect);
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        gbc.weighty = 0;
+        panel.add(jbDeselect, gbc);
         panel.setAlignmentX(0.0f);
         Dimension pref = panel.getPreferredSize();
         pref = new Dimension(toolGroupWidth, pref.height);

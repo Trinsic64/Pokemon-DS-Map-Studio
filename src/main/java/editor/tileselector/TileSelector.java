@@ -27,6 +27,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.function.IntConsumer;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
@@ -89,6 +90,10 @@ public class TileSelector extends JPanel {
     private PaletteFolder resizingPinnedFolder;
     private int pinnedResizeStartY;
     private int pinnedResizeStartHeight;
+    private boolean readOnlySelectionMode;
+    private int readOnlySelectedIndex;
+    private IntConsumer readOnlySelectionListener = index -> { };
+    private Runnable readOnlyLayoutListener = () -> { };
 
     /** One displayed folder block: header bar + tile area. */
     private static class Section {
@@ -160,6 +165,9 @@ public class TileSelector extends JPanel {
     }
 
     private void formMouseDragged(MouseEvent evt) {
+        if (readOnlySelectionMode) {
+            return;
+        }
         if (resizingPinnedFolder != null) {
             int height = Math.max(MIN_PINNED_BODY_HEIGHT,
                     pinnedResizeStartHeight + evt.getY() - pinnedResizeStartY);
@@ -219,6 +227,10 @@ public class TileSelector extends JPanel {
     }
 
     private void formMousePressed(MouseEvent evt) {
+        if (readOnlySelectionMode) {
+            readOnlyMousePressed(evt);
+            return;
+        }
         PinnedLayout resizeLayout = getPinnedDividerAt(evt.getPoint());
         if (resizeLayout != null && SwingUtilities.isLeftMouseButton(evt)) {
             resizingPinnedFolder = resizeLayout.section.folder;
@@ -250,7 +262,7 @@ public class TileSelector extends JPanel {
             if (SwingUtilities.isLeftMouseButton(evt)) {
                 if (rangeAnchorFromRightClick && clickedSection == rangeSelectionSection) {
                     rangeSelectedIndices = getVisualRange(rangeSelectionSection,
-                            handler.getTileIndexSelected(), index);
+                            getSelectedTileIndex(), index);
                     indexSecondTileSelected = index;
                     multiselecting = rangeSelectedIndices.size() > 1;
                     rangeAnchorFromRightClick = false;
@@ -261,15 +273,15 @@ public class TileSelector extends JPanel {
                     multiSelectImg = handler.getTileset().get(index).getThumbnail();
                     multiselecting = false;
                 } else if (rangeSelectionInitialized && clickedSection == rangeSelectionSection
-                        && index == handler.getTileIndexSelected()) {
+                        && index == getSelectedTileIndex()) {
                     canDrag = true;
-                    indexSecondTileSelected = handler.getTileIndexSelected();
+                    indexSecondTileSelected = getSelectedTileIndex();
                     dragSelectionIndices = getIndicesSelected();
                     dragSelectionAnchorIndex = index;
-                    multiSelectImg = handler.getTileSelected().getThumbnail();
+                    multiSelectImg = handler.getTileset().get(getSelectedTileIndex()).getThumbnail();
                     multiselecting = false;
                 } else {
-                    handler.setIndexTileSelected(index);
+                    setSelectedTileIndex(index);
                     rangeSelectionSection = clickedSection;
                     rangeSelectionInitialized = true;
                     rangeSelectedIndices.clear();
@@ -282,8 +294,8 @@ public class TileSelector extends JPanel {
                 indexSecondTileSelected = index;
                 if (!rangeSelectionInitialized || clickedSection != rangeSelectionSection
                         || (rangeSelectionSection != null
-                        && !rangeSelectionSection.tileIndices.contains(handler.getTileIndexSelected()))) {
-                    handler.setIndexTileSelected(index);
+                            && !rangeSelectionSection.tileIndices.contains(getSelectedTileIndex()))) {
+                    setSelectedTileIndex(index);
                     rangeSelectionSection = clickedSection;
                     rangeSelectionInitialized = true;
                     rangeSelectedIndices.clear();
@@ -292,7 +304,7 @@ public class TileSelector extends JPanel {
                     rangeAnchorFromRightClick = true;
                 } else {
                     rangeSelectedIndices = getVisualRange(rangeSelectionSection,
-                            handler.getTileIndexSelected(), index);
+                            getSelectedTileIndex(), index);
                     multiselecting = rangeSelectedIndices.size() > 1;
                     rangeAnchorFromRightClick = false;
                 }
@@ -342,7 +354,7 @@ public class TileSelector extends JPanel {
                 repaint();
                 return;
             }
-            handler.setIndexTileSelected(index);
+            setSelectedTileIndex(index);
             if (SwingUtilities.isLeftMouseButton(evt)) {
                 //Pressing a multi selected tile arms a group drag and keeps
                 //the selection; a plain click clears it on release instead
@@ -388,6 +400,29 @@ public class TileSelector extends JPanel {
         }
     }
 
+    private void readOnlyMousePressed(MouseEvent evt) {
+        if (handler == null || !SwingUtilities.isLeftMouseButton(evt)) {
+            return;
+        }
+        Section headerSection = getHeaderSectionAt(evt.getX(), evt.getY());
+        if (headerSection != null) {
+            PaletteFolder folder = headerSection.folder;
+            if (folder == null && headerSection.allTiles) {
+                folder = handler.getTileset().getOrCreatePaletteFolder(PaletteFolder.UNSORTED);
+            }
+            if (folder != null) {
+                folder.setCollapsed(!folder.isCollapsed());
+                readOnlyLayoutListener.run();
+            }
+            return;
+        }
+        int index = getIndexSelected(evt);
+        if (index >= 0) {
+            setSelectedTileIndex(index);
+            repaint();
+        }
+    }
+
     private void addLayoutRow(Section section) {
         if (section.folder == null) {
             return;
@@ -398,6 +433,9 @@ public class TileSelector extends JPanel {
     }
 
     private void formMouseReleased(MouseEvent evt) {
+        if (readOnlySelectionMode) {
+            return;
+        }
         if (resizingPinnedFolder != null) {
             resizingPinnedFolder = null;
             setCursor(Cursor.getDefaultCursor());
@@ -409,7 +447,7 @@ public class TileSelector extends JPanel {
                 if (bandRect == null && SwingUtilities.isLeftMouseButton(evt)) {
                     //Shift + click: select the range from the current tile to the click
                     int index = getIndexSelected(evt);
-                    int from = handler.getTileIndexSelected();
+                    int from = getSelectedTileIndex();
                     if (index != -1 && from >= 0) {
                         multiSelected.clear();
                         for (int i = Math.min(from, index); i <= Math.max(from, index); i++) {
@@ -471,7 +509,7 @@ public class TileSelector extends JPanel {
                 int insertionIndex = Math.max(0, indices.indexOf(index));
                 indices.addAll(insertionIndex, selectionIndices);
                 handler.getTileset().moveTiles(indices);
-                handler.setIndexTileSelected(insertionIndex);
+                setSelectedTileIndex(insertionIndex);
                 rangeSelectedIndices.clear();
                 rangeSelectedIndices.add(insertionIndex);
                 multiselecting = false;
@@ -496,7 +534,7 @@ public class TileSelector extends JPanel {
             }
             if (handler != null && handler.getTileset().size() > 0) {
                 g.setColor(Color.red);
-                drawTileBounds(g, handler.getTileIndexSelected());
+                drawTileBounds(g, getSelectedTileIndex());
             }
         }
 
@@ -505,7 +543,7 @@ public class TileSelector extends JPanel {
                 if (multiSelectionEnabled && !rangeSelectedIndices.isEmpty()
                         && boundingBoxes.size() > 0) {
                     for (int i : rangeSelectedIndices) {
-                        if (i == handler.getTileIndexSelected()) {
+                        if (i == getSelectedTileIndex()) {
                             continue;
                         }
                         g.setColor(Color.red);
@@ -565,8 +603,48 @@ public class TileSelector extends JPanel {
     public void init(MapEditorHandler handler) {
         this.handler = handler;
         this.multiSelectionEnabled = false;
+        this.readOnlySelectionMode = false;
 
         updateLayout();
+    }
+
+    public void initReadOnly(MapEditorHandler handler, int selectedIndex,
+                             IntConsumer selectionListener, Runnable layoutListener) {
+        this.handler = handler;
+        this.multiSelectionEnabled = false;
+        this.readOnlySelectionMode = true;
+        this.readOnlySelectedIndex = clampTileIndex(selectedIndex);
+        this.readOnlySelectionListener = selectionListener == null
+                ? index -> { } : selectionListener;
+        this.readOnlyLayoutListener = layoutListener == null ? () -> { } : layoutListener;
+        multiSelected.clear();
+        updateLayout();
+    }
+
+    private int getSelectedTileIndex() {
+        return readOnlySelectionMode ? readOnlySelectedIndex : handler.getTileIndexSelected();
+    }
+
+    public void setReadOnlySelectedIndex(int index) {
+        if (!readOnlySelectionMode) {
+            return;
+        }
+        readOnlySelectedIndex = clampTileIndex(index);
+        repaint();
+    }
+
+    private void setSelectedTileIndex(int index) {
+        int clamped = clampTileIndex(index);
+        if (readOnlySelectionMode) {
+            readOnlySelectedIndex = clamped;
+            readOnlySelectionListener.accept(clamped);
+        } else {
+            handler.setIndexTileSelected(clamped);
+        }
+    }
+
+    private int clampTileIndex(int index) {
+        return Math.max(0, Math.min(index, Math.max(0, handler.getTileset().size() - 1)));
     }
 
     public void updateLayout() {
@@ -981,10 +1059,10 @@ public class TileSelector extends JPanel {
             return;
         }
         g.setColor(Color.red);
-        drawTileBoundsInSection(g, handler.getTileIndexSelected(), section);
+        drawTileBoundsInSection(g, getSelectedTileIndex(), section);
         if (multiSelectionEnabled && !rangeSelectedIndices.isEmpty()) {
             for (int i : rangeSelectedIndices) {
-                if (i == handler.getTileIndexSelected()) {
+                if (i == getSelectedTileIndex()) {
                     continue;
                 }
                 drawTileBoundsInSection(g, i, section);
@@ -1599,6 +1677,10 @@ public class TileSelector extends JPanel {
     }
 
     private void formMouseMoved(MouseEvent evt) {
+        if (readOnlySelectionMode) {
+            setCursor(Cursor.getDefaultCursor());
+            return;
+        }
         setCursor(getPinnedDividerAt(evt.getPoint()) == null
                 ? Cursor.getDefaultCursor()
                 : Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR));
@@ -2530,7 +2612,7 @@ public class TileSelector extends JPanel {
             return new ArrayList<>(rangeSelectedIndices);
         }
         ArrayList<Integer> indices = new ArrayList<>(1);
-        indices.add(handler.getTileIndexSelected());
+        indices.add(getSelectedTileIndex());
         return indices;
     }
 
@@ -2662,8 +2744,8 @@ public class TileSelector extends JPanel {
     }
 
     public int getTileSelectedY() {
-        if (handler.getTileIndexSelected() < boundingBoxes.size()) {
-            return Math.max(0, boundingBoxes.get(handler.getTileIndexSelected()).y);
+        if (getSelectedTileIndex() < boundingBoxes.size()) {
+            return Math.max(0, boundingBoxes.get(getSelectedTileIndex()).y);
         }
         return 0;
     }

@@ -5,34 +5,47 @@ import editor.grid.MapGrid;
 import editor.handler.MapData;
 import editor.handler.MapEditorHandler;
 import editor.state.GlobalMapEditState;
+import editor.tileselector.TileSelector;
 import formats.collisions.CollisionDefaultsApplier;
 import tileset.Tile;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * Matrix-scoped editing for operations that would otherwise need to be
- * repeated in every map chunk.
+ * Main-window-style workspace for editing selected layers across highlighted
+ * matrix chunks. Each Apply is captured as one undoable map state.
  */
 public final class GlobalMapEditDialog extends JDialog {
+
+    private static final Color PREVIEW_BACKGROUND = new Color(0, 127, 127);
 
     private final MainFrame owner;
     private final MapEditorHandler handler;
     private final MatrixSelectionPanel matrixSelection;
     private final JCheckBox[] layerChecks = new JCheckBox[MapGrid.numLayers];
+    private final LayerPreview[] layerPreviews = new LayerPreview[MapGrid.numLayers];
     private final JTabbedPane operations = new JTabbedPane();
     private final JLabel status = new JLabel("Choose chunks, layers, and an operation.");
 
-    private final TileChoicePanel sourceTile;
-    private final TileChoicePanel replacementTile;
+    private final TileSelector sourceBrowser = new TileSelector();
+    private final TileSelector replacementBrowser = new TileSelector();
+    private final JLabel sourceSummary = new JLabel(" ");
+    private final JLabel replacementSummary = new JLabel(" ");
+    private final JLabel replaceSummary = new JLabel(" ");
+    private int sourceTileIndex;
+    private int replacementTileIndex;
+
     private final JCheckBox swapTiles = new JCheckBox("Swap both directions (A \u2194 B)");
     private final JCheckBox applyCollisionDefaults =
             new JCheckBox("Refresh smart collision defaults after replacement");
@@ -53,41 +66,170 @@ public final class GlobalMapEditDialog extends JDialog {
         this.owner = owner;
         this.handler = handler;
         this.matrixSelection = new MatrixSelectionPanel(handler);
-        this.sourceTile = new TileChoicePanel("Find tile", handler);
-        this.replacementTile = new TileChoicePanel("Replacement tile", handler);
+
+        int selectedTile = clampTileIndex(handler.getTileIndexSelected());
+        sourceTileIndex = selectedTile;
+        replacementTileIndex = clampTileIndex(selectedTile + 1);
+        sourceBrowser.initReadOnly(handler, sourceTileIndex,
+                this::setSourceTileIndex, this::refreshTileBrowserLayouts);
+        replacementBrowser.initReadOnly(handler, replacementTileIndex,
+                this::setReplacementTileIndex, this::refreshTileBrowserLayouts);
 
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
         setLayout(new BorderLayout(8, 8));
         ((JComponent) getContentPane()).setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        JLabel description = new JLabel("<html><b>Global Map Editor</b> \u2014 click or drag across the matrix "
-                + "to highlight chunks. Every Apply is one undoable edit.</html>");
-        add(description, BorderLayout.NORTH);
-
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                createMatrixPanel(), createOperationPanel());
-        split.setResizeWeight(0.55);
-        split.setContinuousLayout(true);
-        add(split, BorderLayout.CENTER);
+        add(createHeading(), BorderLayout.NORTH);
+        add(createWorkspace(), BorderLayout.CENTER);
         add(createButtonBar(), BorderLayout.SOUTH);
 
         selectCurrentLayer();
         copySourceLayer.setSelectedIndex(handler.getActiveLayerIndex());
         copyTargetLayer.setSelectedIndex((handler.getActiveLayerIndex() + 1) % MapGrid.numLayers);
-        int selectedTile = Math.max(0, Math.min(handler.getTileIndexSelected(),
-                Math.max(0, handler.getTileset().size() - 1)));
-        sourceTile.setTileIndex(selectedTile);
-        replacementTile.setTileIndex(Math.min(selectedTile + 1,
-                Math.max(0, handler.getTileset().size() - 1)));
+        updateTileSummaries();
+        installKeyboardActions();
+        installWorkspaceRefresh();
+        fitToDesktop();
 
-        setMinimumSize(new Dimension(860, 610));
-        setSize(1050, 720);
-        setLocationRelativeTo(owner);
+        SwingUtilities.invokeLater(matrixSelection::showCurrentMap);
+    }
+
+    private JComponent createHeading() {
+        JPanel panel = new JPanel(new BorderLayout(12, 0));
+        JLabel heading = new JLabel("<html><b>Global Map Editor</b><br>"
+                + "<span style='font-size:9px'>Choose layers on the left, tiles from the "
+                + "folder lists, and drag across the overview to choose map chunks.</span></html>");
+        panel.add(heading, BorderLayout.WEST);
+
+        JLabel undoNote = new JLabel("Every Apply is one undoable edit.");
+        undoNote.setForeground(UIManager.getColor("Label.disabledForeground"));
+        panel.add(undoNote, BorderLayout.EAST);
+        return panel;
+    }
+
+    private JComponent createWorkspace() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.weighty = 1;
+
+        gbc.gridx = 0;
+        gbc.weightx = 0;
+        gbc.insets = new Insets(0, 0, 0, 8);
+        panel.add(createLayerColumn(), gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 0.22;
+        panel.add(createTileBrowserPanel(
+                "A. Find tile", sourceBrowser, sourceSummary, true), gbc);
+
+        gbc.gridx = 2;
+        gbc.weightx = 0.56;
+        panel.add(createCenterWorkspace(), gbc);
+
+        gbc.gridx = 3;
+        gbc.weightx = 0.22;
+        gbc.insets = new Insets(0, 0, 0, 0);
+        panel.add(createTileBrowserPanel(
+                "B. Replacement tile", replacementBrowser, replacementSummary, false), gbc);
+        return panel;
+    }
+
+    private JComponent createLayerColumn() {
+        JPanel panel = new JPanel(new BorderLayout(3, 3));
+        panel.setBorder(BorderFactory.createTitledBorder("Layers"));
+        panel.setPreferredSize(new Dimension(126, 620));
+        panel.setMinimumSize(new Dimension(116, 300));
+
+        JPanel buttons = new JPanel(new GridLayout(1, 3, 2, 0));
+        JButton all = compactButton("All", "Select every layer");
+        all.addActionListener(e -> setAllLayers(true));
+        JButton current = compactButton("Cur.", "Select the current layer only");
+        current.addActionListener(e -> selectCurrentLayer());
+        JButton none = compactButton("None", "Clear the layer selection");
+        none.addActionListener(e -> setAllLayers(false));
+        buttons.add(all);
+        buttons.add(current);
+        buttons.add(none);
+        panel.add(buttons, BorderLayout.NORTH);
+
+        JPanel rows = new JPanel();
+        rows.setLayout(new BoxLayout(rows, BoxLayout.Y_AXIS));
+        for (int i = 0; i < MapGrid.numLayers; i++) {
+            int layer = i;
+            layerChecks[i] = new JCheckBox("Layer " + (i + 1));
+            layerChecks[i].setToolTipText("Include Layer " + (i + 1)
+                    + " in Replace, Height, and Clear operations");
+            layerPreviews[i] = new LayerPreview(layer);
+            layerChecks[i].addItemListener(e -> layerPreviews[layer].repaint());
+
+            JPanel row = new JPanel(new BorderLayout(0, 1));
+            row.setBorder(new EmptyBorder(1, 2, 2, 2));
+            row.add(layerChecks[i], BorderLayout.NORTH);
+            row.add(layerPreviews[i], BorderLayout.CENTER);
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 82));
+            rows.add(row);
+        }
+
+        JScrollPane scroll = new JScrollPane(rows,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getVerticalScrollBar().setUnitIncrement(64);
+        panel.add(scroll, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JComponent createTileBrowserPanel(String title, TileSelector browser,
+                                               JLabel summary, boolean source) {
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.setBorder(BorderFactory.createTitledBorder(title));
+        panel.setPreferredSize(new Dimension(225, 620));
+        panel.setMinimumSize(new Dimension(160, 300));
+
+        JButton useSelected = new JButton("Use main selection");
+        useSelected.setFocusable(false);
+        useSelected.setMargin(new Insets(2, 5, 2, 5));
+        useSelected.setToolTipText("Use the tile currently selected in the main editor");
+        useSelected.addActionListener(e -> {
+            if (source) {
+                setSourceTileIndex(handler.getTileIndexSelected());
+                sourceBrowser.setReadOnlySelectedIndex(sourceTileIndex);
+            } else {
+                setReplacementTileIndex(handler.getTileIndexSelected());
+                replacementBrowser.setReadOnlySelectedIndex(replacementTileIndex);
+            }
+        });
+        panel.add(useSelected, BorderLayout.NORTH);
+
+        JPanel browserSurface = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        browserSurface.add(browser);
+        JScrollPane scroll = new JScrollPane(browserSurface);
+        scroll.getVerticalScrollBar().setUnitIncrement(32);
+        scroll.getHorizontalScrollBar().setUnitIncrement(16);
+        scroll.getViewport().setBackground(UIManager.getColor("Panel.background"));
+        panel.add(scroll, BorderLayout.CENTER);
+
+        summary.setBorder(new EmptyBorder(3, 2, 1, 2));
+        summary.setHorizontalAlignment(SwingConstants.CENTER);
+        summary.setVerticalAlignment(SwingConstants.TOP);
+        summary.setPreferredSize(new Dimension(150, 48));
+        panel.add(summary, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private JComponent createCenterWorkspace() {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+        panel.setMinimumSize(new Dimension(430, 300));
+        panel.add(createMatrixPanel(), BorderLayout.CENTER);
+        panel.add(createOperationPanel(), BorderLayout.SOUTH);
+        return panel;
     }
 
     private JPanel createMatrixPanel() {
         JPanel panel = new JPanel(new BorderLayout(4, 4));
-        panel.setBorder(BorderFactory.createTitledBorder("1. Matrix chunks"));
+        panel.setBorder(BorderFactory.createTitledBorder("Matrix chunks"));
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         JButton selectAll = new JButton("Select All");
@@ -99,7 +241,24 @@ public final class GlobalMapEditDialog extends JDialog {
         buttons.add(selectAll);
         buttons.add(clear);
         buttons.add(invert);
+        buttons.add(Box.createHorizontalStrut(8));
         buttons.add(matrixSelection.getSelectionLabel());
+        buttons.add(Box.createHorizontalStrut(8));
+        buttons.add(new JLabel("Zoom:"));
+
+        JLabel zoomValue = new JLabel("50%");
+        zoomValue.setPreferredSize(new Dimension(38, 20));
+        JSlider zoom = new JSlider(25, 100, 50);
+        zoom.setPreferredSize(new Dimension(100, 22));
+        zoom.setToolTipText("Scale matrix thumbnails");
+        zoom.addChangeListener(e -> {
+            int percent = zoom.getValue();
+            matrixSelection.setCellSize(
+                    Math.max(16, MapData.mapThumbnailSize * percent / 100));
+            zoomValue.setText(percent + "%");
+        });
+        buttons.add(zoom);
+        buttons.add(zoomValue);
         panel.add(buttons, BorderLayout.NORTH);
 
         JScrollPane scrollPane = new JScrollPane(matrixSelection);
@@ -110,8 +269,9 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private JPanel createOperationPanel() {
-        JPanel panel = new JPanel(new BorderLayout(6, 6));
-        panel.add(createLayerFilterPanel(), BorderLayout.NORTH);
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.setBorder(BorderFactory.createTitledBorder("Operation"));
+        panel.setPreferredSize(new Dimension(430, 210));
 
         operations.addTab("Replace / Swap", createReplacePanel());
         operations.addTab("Copy Layer", createCopyPanel());
@@ -121,64 +281,39 @@ public final class GlobalMapEditDialog extends JDialog {
         return panel;
     }
 
-    private JPanel createLayerFilterPanel() {
-        JPanel panel = new JPanel(new BorderLayout(4, 4));
-        panel.setBorder(BorderFactory.createTitledBorder(
-                "2. Layers affected (Replace, Heights, Clear)"));
-
-        JPanel checks = new JPanel(new GridLayout(3, 3, 4, 2));
-        for (int i = 0; i < layerChecks.length; i++) {
-            layerChecks[i] = new JCheckBox("Layer " + (i + 1));
-            checks.add(layerChecks[i]);
-        }
-        panel.add(checks, BorderLayout.CENTER);
-
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        JButton all = new JButton("All");
-        all.addActionListener(e -> setAllLayers(true));
-        JButton current = new JButton("Current");
-        current.addActionListener(e -> selectCurrentLayer());
-        JButton none = new JButton("None");
-        none.addActionListener(e -> setAllLayers(false));
-        buttons.add(all);
-        buttons.add(current);
-        buttons.add(none);
-        panel.add(buttons, BorderLayout.SOUTH);
-        return panel;
-    }
-
     private JPanel createReplacePanel() {
-        JPanel panel = new JPanel(new BorderLayout(6, 6));
-        panel.setBorder(new EmptyBorder(8, 8, 8, 8));
-        JPanel previews = new JPanel(new GridLayout(1, 2, 8, 0));
-        previews.add(sourceTile);
-        previews.add(replacementTile);
-        panel.add(previews, BorderLayout.CENTER);
+        JPanel panel = new JPanel();
+        panel.setBorder(new EmptyBorder(9, 10, 8, 10));
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
 
-        JPanel options = new JPanel();
-        options.setLayout(new BoxLayout(options, BoxLayout.Y_AXIS));
-        options.add(swapTiles);
-        options.add(applyCollisionDefaults);
-        JLabel note = new JLabel("<html>Replace changes A into B. Swap also changes every B into A "
-                + "within the highlighted chunks and checked layers.</html>");
-        note.setBorder(new EmptyBorder(5, 2, 0, 2));
-        options.add(note);
-        panel.add(options, BorderLayout.SOUTH);
+        replaceSummary.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(replaceSummary);
+        panel.add(Box.createVerticalStrut(5));
+        swapTiles.setAlignmentX(Component.LEFT_ALIGNMENT);
+        applyCollisionDefaults.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(swapTiles);
+        panel.add(applyCollisionDefaults);
+        panel.add(Box.createVerticalStrut(5));
+
+        JLabel note = new JLabel("<html>Replace changes A into B. Swap also changes B into A "
+                + "inside the highlighted chunks and selected layers.</html>");
+        note.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(note);
+        panel.add(Box.createVerticalGlue());
         return panel;
     }
 
     private JPanel createCopyPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(new EmptyBorder(12, 12, 12, 12));
+        panel.setBorder(new EmptyBorder(8, 10, 8, 10));
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(4, 4, 4, 4);
+        gbc.insets = new Insets(3, 3, 3, 3);
         gbc.anchor = GridBagConstraints.WEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.weightx = 0;
 
         gbc.gridx = 0;
         gbc.gridy = 0;
-        panel.add(new JLabel("Source:"), gbc);
+        panel.add(new JLabel("Copy from:"), gbc);
         gbc.gridx = 1;
         gbc.weightx = 1;
         panel.add(copySourceLayer, gbc);
@@ -198,16 +333,16 @@ public final class GlobalMapEditDialog extends JDialog {
         gbc.gridy = 4;
         gbc.weighty = 1;
         gbc.anchor = GridBagConstraints.NORTHWEST;
-        panel.add(new JLabel("<html>For every highlighted chunk, the source layer is copied "
-                + "to the target layer in that same chunk.</html>"), gbc);
+        panel.add(new JLabel("<html>The chosen source layer is copied to the target layer "
+                + "inside every highlighted chunk.</html>"), gbc);
         return panel;
     }
 
     private JPanel createHeightPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(new EmptyBorder(12, 12, 12, 12));
+        panel.setBorder(new EmptyBorder(8, 10, 8, 10));
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(4, 4, 4, 4);
+        gbc.insets = new Insets(3, 3, 3, 3);
         gbc.anchor = GridBagConstraints.WEST;
         gbc.gridx = 0;
         gbc.gridy = 0;
@@ -222,19 +357,23 @@ public final class GlobalMapEditDialog extends JDialog {
         gbc.weighty = 1;
         gbc.anchor = GridBagConstraints.NORTHWEST;
         panel.add(new JLabel("<html>Positive values raise tiles; negative values lower them. "
-                + "Values are automatically kept inside the supported height range.</html>"), gbc);
+                + "Results remain inside the supported height range.</html>"), gbc);
         return panel;
     }
 
     private JPanel createClearPanel() {
         JPanel panel = new JPanel();
-        panel.setBorder(new EmptyBorder(12, 12, 12, 12));
+        panel.setBorder(new EmptyBorder(9, 10, 8, 10));
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        clearTiles.setAlignmentX(Component.LEFT_ALIGNMENT);
+        clearHeights.setAlignmentX(Component.LEFT_ALIGNMENT);
         panel.add(clearTiles);
         panel.add(clearHeights);
         panel.add(Box.createVerticalStrut(8));
-        panel.add(new JLabel("<html>Clears only the highlighted chunks and checked layers. "
-                + "You can undo the entire clear in one step.</html>"));
+        JLabel note = new JLabel("<html>Clears only the highlighted chunks and selected layers. "
+                + "The entire clear can be undone in one step.</html>");
+        note.setAlignmentX(Component.LEFT_ALIGNMENT);
+        panel.add(note);
         panel.add(Box.createVerticalGlue());
         return panel;
     }
@@ -250,7 +389,7 @@ public final class GlobalMapEditDialog extends JDialog {
         undo.addActionListener(e -> {
             if (handler.getMapStateHandler().canGetPreviousState()) {
                 owner.undoMapState();
-                matrixSelection.repaint();
+                refreshWorkspaceVisuals();
                 status.setText("Undid the most recent map edit.");
             } else {
                 showValidation("There is no map edit to undo.");
@@ -266,6 +405,101 @@ public final class GlobalMapEditDialog extends JDialog {
         panel.add(buttons, BorderLayout.EAST);
         getRootPane().setDefaultButton(apply);
         return panel;
+    }
+
+    private void installKeyboardActions() {
+        getRootPane().registerKeyboardAction(e -> dispose(),
+                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
+                JComponent.WHEN_IN_FOCUSED_WINDOW);
+    }
+
+    private void installWorkspaceRefresh() {
+        addWindowFocusListener(new WindowAdapter() {
+            @Override
+            public void windowGainedFocus(WindowEvent event) {
+                sourceTileIndex = clampTileIndex(sourceTileIndex);
+                replacementTileIndex = clampTileIndex(replacementTileIndex);
+                sourceBrowser.setReadOnlySelectedIndex(sourceTileIndex);
+                replacementBrowser.setReadOnlySelectedIndex(replacementTileIndex);
+                sourceBrowser.updateLayout();
+                replacementBrowser.updateLayout();
+                updateTileSummaries();
+                refreshWorkspaceVisuals();
+            }
+        });
+    }
+
+    private void fitToDesktop() {
+        Rectangle usable = GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+        int width = Math.min(1480, Math.max(980, usable.width - 80));
+        int height = Math.min(900, Math.max(680, usable.height - 80));
+        width = Math.min(width, usable.width);
+        height = Math.min(height, usable.height);
+        setMinimumSize(new Dimension(Math.min(1050, usable.width),
+                Math.min(650, usable.height)));
+        setSize(width, height);
+        setLocation(usable.x + (usable.width - width) / 2,
+                usable.y + (usable.height - height) / 2);
+    }
+
+    private void setSourceTileIndex(int index) {
+        sourceTileIndex = clampTileIndex(index);
+        updateTileSummaries();
+    }
+
+    private void setReplacementTileIndex(int index) {
+        replacementTileIndex = clampTileIndex(index);
+        updateTileSummaries();
+    }
+
+    private int clampTileIndex(int index) {
+        return Math.max(0, Math.min(index, Math.max(0, handler.getTileset().size() - 1)));
+    }
+
+    private void updateTileSummaries() {
+        sourceSummary.setText(tileSummary(sourceTileIndex));
+        replacementSummary.setText(tileSummary(replacementTileIndex));
+        replaceSummary.setText("<html><b>A: " + tileShortName(sourceTileIndex)
+                + "</b> &nbsp;\u2192&nbsp; <b>B: " + tileShortName(replacementTileIndex)
+                + "</b></html>");
+    }
+
+    private String tileSummary(int index) {
+        if (handler.getTileset().size() == 0 || index >= handler.getTileset().size()) {
+            return "No tile loaded";
+        }
+        Tile tile = handler.getTileset().get(index);
+        String paletteName = tile.getPaletteName();
+        return "<html><center><b>Tile " + index + "</b><br>" + escape(tile.getObjFilename())
+                + (paletteName.isEmpty() ? "" : "<br>\"" + escape(paletteName) + "\"")
+                + "</center></html>";
+    }
+
+    private String tileShortName(int index) {
+        if (handler.getTileset().size() == 0 || index >= handler.getTileset().size()) {
+            return "No tile";
+        }
+        Tile tile = handler.getTileset().get(index);
+        String name = tile.getPaletteName().isEmpty()
+                ? tile.getObjFilename() : tile.getPaletteName();
+        if (name == null || name.isEmpty()) {
+            name = "Tile";
+        }
+        if (name.length() > 28) {
+            name = name.substring(0, 25) + "...";
+        }
+        return escape(name) + " [" + index + "]";
+    }
+
+    private static String escape(String text) {
+        return text == null ? "" : text.replace("&", "&amp;")
+                .replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    private void refreshTileBrowserLayouts() {
+        sourceBrowser.updateLayout();
+        replacementBrowser.updateLayout();
+        owner.updateTileSelectorLayout();
     }
 
     private void applySelectedOperation() {
@@ -297,15 +531,13 @@ public final class GlobalMapEditDialog extends JDialog {
 
         switch (tab) {
             case 0:
-                int from = sourceTile.getTileIndex();
-                int to = replacementTile.getTileIndex();
-                if (from == to) {
+                if (sourceTileIndex == replacementTileIndex) {
                     showValidation("Choose two different tiles.");
                     return;
                 }
                 changed = GlobalMapOperations.replaceTiles(
                         handler.getMapMatrix().getMatrix(), maps, layers,
-                        from, to, swapTiles.isSelected());
+                        sourceTileIndex, replacementTileIndex, swapTiles.isSelected());
                 if (changed > 0 && applyCollisionDefaults.isSelected()) {
                     for (Point point : maps) {
                         MapData mapData = handler.getMapMatrix().getMap(point);
@@ -370,7 +602,8 @@ public final class GlobalMapEditDialog extends JDialog {
         refreshMaps(maps, snapshotLayers);
         status.setText(stateName + ": changed " + changed + " cell(s) in "
                 + maps.size() + " chunk(s)"
-                + (collisionChanges > 0 ? " and refreshed " + collisionChanges + " collision cell(s)." : "."));
+                + (collisionChanges > 0
+                ? " and refreshed " + collisionChanges + " collision cell(s)." : "."));
     }
 
     private void refreshMaps(Set<Point> maps, int[] layers) {
@@ -391,6 +624,16 @@ public final class GlobalMapEditDialog extends JDialog {
         owner.getMapDisplay().repaint();
         owner.updateMapMatrixDisplay();
         owner.updateViewMapInfo();
+        refreshWorkspaceVisuals();
+    }
+
+    private void refreshWorkspaceVisuals() {
+        for (LayerPreview preview : layerPreviews) {
+            if (preview != null) {
+                preview.repaint();
+            }
+        }
+        matrixSelection.updateBounds();
         matrixSelection.revalidate();
         matrixSelection.repaint();
     }
@@ -451,76 +694,33 @@ public final class GlobalMapEditDialog extends JDialog {
         return new JComboBox<>(layers);
     }
 
-    private static final class TileChoicePanel extends JPanel {
-        private final MapEditorHandler handler;
-        private final JSpinner tileIndex;
-        private final JLabel tileName = new JLabel(" ");
-        private final TilePreview preview;
-
-        private TileChoicePanel(String title, MapEditorHandler handler) {
-            super(new BorderLayout(4, 4));
-            this.handler = handler;
-            int maximum = Math.max(0, handler.getTileset().size() - 1);
-            this.tileIndex = new JSpinner(new SpinnerNumberModel(0, 0, maximum, 1));
-            this.preview = new TilePreview(handler, tileIndex);
-            setBorder(BorderFactory.createTitledBorder(title));
-
-            JPanel controls = new JPanel(new BorderLayout(4, 0));
-            controls.add(new JLabel("Tile ID:"), BorderLayout.WEST);
-            controls.add(tileIndex, BorderLayout.CENTER);
-            JButton current = new JButton("Use selected");
-            current.addActionListener(e -> setTileIndex(handler.getTileIndexSelected()));
-            controls.add(current, BorderLayout.EAST);
-            add(controls, BorderLayout.NORTH);
-            add(preview, BorderLayout.CENTER);
-            tileName.setHorizontalAlignment(SwingConstants.CENTER);
-            add(tileName, BorderLayout.SOUTH);
-
-            tileIndex.addChangeListener(e -> updatePreview());
-            updatePreview();
-        }
-
-        private int getTileIndex() {
-            return (Integer) tileIndex.getValue();
-        }
-
-        private void setTileIndex(int index) {
-            SpinnerNumberModel model = (SpinnerNumberModel) tileIndex.getModel();
-            int maximum = (Integer) model.getMaximum();
-            tileIndex.setValue(Math.max(0, Math.min(index, maximum)));
-        }
-
-        private void updatePreview() {
-            int index = getTileIndex();
-            if (handler.getTileset().size() > 0 && index < handler.getTileset().size()) {
-                Tile tile = handler.getTileset().get(index);
-                String name = tile.getObjFilename();
-                String paletteName = tile.getPaletteName();
-                tileName.setText("<html><center>" + escape(name)
-                        + (paletteName.isEmpty() ? "" : "<br>\"" + escape(paletteName) + "\"")
-                        + "</center></html>");
-            } else {
-                tileName.setText("No tile loaded");
-            }
-            preview.repaint();
-        }
-
-        private static String escape(String text) {
-            return text == null ? "" : text.replace("&", "&amp;")
-                    .replace("<", "&lt;").replace(">", "&gt;");
-        }
+    private static JButton compactButton(String text, String tooltip) {
+        JButton button = new JButton(text);
+        button.setFocusable(false);
+        button.setMargin(new Insets(2, 2, 2, 2));
+        button.setToolTipText(tooltip);
+        return button;
     }
 
-    private static final class TilePreview extends JComponent {
-        private final MapEditorHandler handler;
-        private final JSpinner tileIndex;
+    private final class LayerPreview extends JComponent {
 
-        private TilePreview(MapEditorHandler handler, JSpinner tileIndex) {
-            this.handler = handler;
-            this.tileIndex = tileIndex;
-            setPreferredSize(new Dimension(180, 180));
-            setMinimumSize(new Dimension(120, 120));
-            setOpaque(true);
+        private final int layer;
+
+        private LayerPreview(int layer) {
+            this.layer = layer;
+            setPreferredSize(new Dimension(72, 58));
+            setMinimumSize(new Dimension(60, 48));
+            setToolTipText("Click to include or exclude Layer " + (layer + 1));
+            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent event) {
+                    if (SwingUtilities.isLeftMouseButton(event)) {
+                        layerChecks[LayerPreview.this.layer].setSelected(
+                                !layerChecks[LayerPreview.this.layer].isSelected());
+                    }
+                }
+            });
         }
 
         @Override
@@ -528,52 +728,68 @@ public final class GlobalMapEditDialog extends JDialog {
             super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g.create();
             try {
-                int cell = 8;
-                Color first = new Color(72, 72, 72);
-                Color second = new Color(92, 92, 92);
-                for (int x = 0; x < getWidth(); x += cell) {
-                    for (int y = 0; y < getHeight(); y += cell) {
-                        g2.setColor(((x / cell) + (y / cell)) % 2 == 0 ? first : second);
-                        g2.fillRect(x, y, cell, cell);
-                    }
-                }
-                int index = (Integer) tileIndex.getValue();
-                if (index < 0 || index >= handler.getTileset().size()) {
-                    return;
-                }
-                BufferedImage image = handler.getTileset().get(index).getThumbnail();
-                if (image == null) {
-                    image = handler.getTileset().get(index).getSmallThumbnail();
-                }
-                if (image == null) {
-                    return;
-                }
-                double scale = Math.min((getWidth() - 12.0) / image.getWidth(),
-                        (getHeight() - 12.0) / image.getHeight());
-                int width = Math.max(1, (int) Math.round(image.getWidth() * scale));
-                int height = Math.max(1, (int) Math.round(image.getHeight() * scale));
-                Object oldInterpolation = g2.getRenderingHint(RenderingHints.KEY_INTERPOLATION);
+                int inset = 3;
+                int drawWidth = Math.max(1, getWidth() - inset * 2);
+                int drawHeight = Math.max(1, getHeight() - inset * 2);
+                BufferedImage preview = renderLayerPreview(layer);
                 g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                         RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-                g2.drawImage(image, (getWidth() - width) / 2, (getHeight() - height) / 2,
-                        width, height, null);
-                if (oldInterpolation != null) {
-                    g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, oldInterpolation);
+                g2.drawImage(preview, inset, inset, drawWidth, drawHeight, null);
+
+                boolean selected = layerChecks[layer].isSelected();
+                if (!selected) {
+                    g2.setColor(new Color(0, 0, 0, 105));
+                    g2.fillRect(inset, inset, drawWidth, drawHeight);
+                } else {
+                    g2.setColor(new Color(0, 220, 255, 45));
+                    g2.fillRect(inset, inset, drawWidth, drawHeight);
                 }
+                g2.setStroke(new BasicStroke(selected ? 3 : 1));
+                Color border = selected ? new Color(0, 220, 255)
+                        : UIManager.getColor("Separator.foreground");
+                g2.setColor(border == null ? Color.GRAY : border);
+                g2.drawRect(inset, inset, drawWidth - 1, drawHeight - 1);
             } finally {
                 g2.dispose();
             }
         }
+
+        private BufferedImage renderLayerPreview(int layerIndex) {
+            BufferedImage image = new BufferedImage(64, 64, BufferedImage.TYPE_INT_RGB);
+            Graphics graphics = image.getGraphics();
+            try {
+                graphics.setColor(PREVIEW_BACKGROUND);
+                graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+                int[][] grid = handler.getGrid().tileLayers[layerIndex];
+                for (int x = 0; x < MapGrid.cols; x++) {
+                    for (int y = 0; y < MapGrid.rows; y++) {
+                        int tileIndex = grid[x][y];
+                        if (tileIndex < 0 || tileIndex >= handler.getTileset().size()) {
+                            continue;
+                        }
+                        BufferedImage tile = handler.getTileset().get(tileIndex).getSmallThumbnail();
+                        if (tile != null) {
+                            graphics.drawImage(tile, x * 2,
+                                    (MapGrid.cols - y - 1) * 2 - (tile.getHeight() - 2), null);
+                        }
+                    }
+                }
+            } finally {
+                graphics.dispose();
+            }
+            return image;
+        }
     }
 
     private static final class MatrixSelectionPanel extends JPanel {
-        private static final int CELL_SIZE = MapData.mapThumbnailSize;
+
         private final MapEditorHandler handler;
         private final Set<Point> selectedMaps = new LinkedHashSet<>();
         private final JLabel selectionLabel = new JLabel();
         private Point minimum = new Point();
         private Dimension matrixSize = new Dimension(1, 1);
         private Boolean dragSelectionState;
+        private int cellSize = Math.max(16, MapData.mapThumbnailSize / 2);
 
         private MatrixSelectionPanel(MapEditorHandler handler) {
             this.handler = handler;
@@ -662,6 +878,23 @@ public final class GlobalMapEditDialog extends JDialog {
             selectionChanged();
         }
 
+        private void setCellSize(int cellSize) {
+            this.cellSize = Math.max(16, Math.min(MapData.mapThumbnailSize, cellSize));
+            updateBounds();
+            revalidate();
+            repaint();
+        }
+
+        private void showCurrentMap() {
+            Point current = handler.getMapSelected();
+            if (current == null) {
+                return;
+            }
+            int x = (current.x - minimum.x) * cellSize;
+            int y = (current.y - minimum.y) * cellSize;
+            scrollRectToVisible(new Rectangle(x, y, cellSize, cellSize));
+        }
+
         private void selectionChanged() {
             updateSelectionLabel();
             repaint();
@@ -682,14 +915,17 @@ public final class GlobalMapEditDialog extends JDialog {
                 minimum = handler.getMapMatrix().getMinCoords();
                 matrixSize = handler.getMapMatrix().getMatrixSize();
             }
-            setPreferredSize(new Dimension(
-                    Math.max(1, matrixSize.width) * CELL_SIZE,
-                    Math.max(1, matrixSize.height) * CELL_SIZE));
+            Dimension preferred = new Dimension(
+                    Math.max(1, matrixSize.width) * cellSize,
+                    Math.max(1, matrixSize.height) * cellSize);
+            if (!preferred.equals(getPreferredSize())) {
+                setPreferredSize(preferred);
+            }
         }
 
         private Point mapAt(Point pixel) {
-            int matrixX = Math.floorDiv(pixel.x, CELL_SIZE) + minimum.x;
-            int matrixY = Math.floorDiv(pixel.y, CELL_SIZE) + minimum.y;
+            int matrixX = Math.floorDiv(pixel.x, cellSize) + minimum.x;
+            int matrixY = Math.floorDiv(pixel.y, cellSize) + minimum.y;
             Point point = new Point(matrixX, matrixY);
             return handler.getMapMatrix().getMatrix().containsKey(point) ? point : null;
         }
@@ -700,7 +936,8 @@ public final class GlobalMapEditDialog extends JDialog {
             if (point == null) {
                 return null;
             }
-            return handler.getMapMatrix().getMapName(point) + "  (" + point.x + ", " + point.y + ")";
+            return handler.getMapMatrix().getMapName(point)
+                    + "  (" + point.x + ", " + point.y + ")";
         }
 
         @Override
@@ -714,28 +951,35 @@ public final class GlobalMapEditDialog extends JDialog {
                 for (Map.Entry<Point, MapData> entry
                         : handler.getMapMatrix().getMatrix().entrySet()) {
                     Point point = entry.getKey();
-                    int x = (point.x - minimum.x) * CELL_SIZE;
-                    int y = (point.y - minimum.y) * CELL_SIZE;
+                    int x = (point.x - minimum.x) * cellSize;
+                    int y = (point.y - minimum.y) * cellSize;
                     BufferedImage thumbnail = entry.getValue().getMapThumbnail();
                     if (thumbnail != null) {
-                        g2.drawImage(thumbnail, x, y, CELL_SIZE, CELL_SIZE, null);
+                        g2.drawImage(thumbnail, x, y, cellSize, cellSize, null);
                     } else {
-                        g2.setColor(new Color(0, 128, 128));
-                        g2.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+                        g2.setColor(PREVIEW_BACKGROUND);
+                        g2.fillRect(x, y, cellSize, cellSize);
                     }
 
                     if (selectedMaps.contains(point)) {
                         g2.setColor(new Color(0, 220, 255, 85));
-                        g2.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+                        g2.fillRect(x, y, cellSize, cellSize);
                         g2.setColor(new Color(0, 240, 255));
-                        g2.setStroke(new BasicStroke(3));
+                        g2.setStroke(new BasicStroke(Math.max(2, cellSize / 20f)));
                     } else {
                         g2.setColor(new Color(0, 0, 0, 115));
-                        g2.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+                        g2.fillRect(x, y, cellSize, cellSize);
                         g2.setColor(new Color(90, 90, 90));
                         g2.setStroke(new BasicStroke(1));
                     }
-                    g2.drawRect(x, y, CELL_SIZE - 1, CELL_SIZE - 1);
+                    g2.drawRect(x, y, cellSize - 1, cellSize - 1);
+
+                    if (point.equals(handler.getMapSelected())) {
+                        g2.setColor(Color.WHITE);
+                        g2.setStroke(new BasicStroke(1));
+                        g2.drawRect(x + 2, y + 2,
+                                Math.max(0, cellSize - 5), Math.max(0, cellSize - 5));
+                    }
                 }
             } finally {
                 g2.dispose();
