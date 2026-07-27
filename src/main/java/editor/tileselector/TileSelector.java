@@ -96,6 +96,7 @@ public class TileSelector extends JPanel {
     private IntConsumer readOnlySelectionListener = index -> { };
     private Runnable readOnlyLayoutListener = () -> { };
     private Set<Integer> readOnlyVisibleIndices;
+    private int readOnlyColumns = maxCols;
 
     /** One displayed folder block: header bar + tile area. */
     private static class Section {
@@ -625,6 +626,22 @@ public class TileSelector extends JPanel {
         updateLayout();
     }
 
+    /**
+     * Lets embedded read-only selectors use the width of their viewport instead
+     * of retaining the main editor's fixed eight-column layout.
+     */
+    public void setReadOnlyColumnCount(int columns) {
+        if (!readOnlySelectionMode) {
+            return;
+        }
+        int clamped = Math.max(4, Math.min(32, columns));
+        if (readOnlyColumns == clamped) {
+            return;
+        }
+        readOnlyColumns = clamped;
+        updateLayout();
+    }
+
     private int getSelectedTileIndex() {
         return readOnlySelectionMode ? readOnlySelectedIndex : handler.getTileIndexSelected();
     }
@@ -668,7 +685,8 @@ public class TileSelector extends JPanel {
         sections = new ArrayList<>();
         placements = new ArrayList<>();
         folderViewActive = false;
-        widthUnits = maxCols;
+        int flowColumns = readOnlySelectionMode ? readOnlyColumns : maxCols;
+        widthUnits = flowColumns;
 
         if (handler == null) {
             return;
@@ -677,10 +695,10 @@ public class TileSelector extends JPanel {
 
         int height;
         if (multiSelectionEnabled && !hasNamedFolders()) {
-            height = Math.max(1, computeFlatLayout());
+            height = Math.max(1, computeFlatLayout(flowColumns));
         } else {
             folderViewActive = true;
-            height = Math.max(1, computeFolderLayout());
+            height = Math.max(1, computeFolderLayout(flowColumns));
         }
         rows = height / tilePixelSize;
 
@@ -712,7 +730,7 @@ public class TileSelector extends JPanel {
     /* -------------------- Layout -------------------- */
 
     /** Classic layout: every tile in index order, flowing in 8 unit columns. */
-    private int computeFlatLayout() {
+    private int computeFlatLayout(int flowColumns) {
         for (int i = 0; i < handler.getTileset().size(); i++) {
             boundingBoxes.add(HIDDEN_BOUNDS);
         }
@@ -722,7 +740,7 @@ public class TileSelector extends JPanel {
                 all.add(i);
             }
         }
-        return flowTiles(null, all, 0, maxCols);
+        return flowTiles(null, all, 0, flowColumns);
     }
 
     /**
@@ -730,7 +748,7 @@ public class TileSelector extends JPanel {
      * section below always shows every tile in tile id order (the order that
      * matters for animations and exports is never changed by folders).
      */
-    private int computeFolderLayout() {
+    private int computeFolderLayout(int flowColumns) {
         Tileset tset = handler.getTileset();
         for (int i = 0; i < tset.size(); i++) {
             boundingBoxes.add(HIDDEN_BOUNDS);
@@ -779,7 +797,7 @@ public class TileSelector extends JPanel {
         int width = widthUnits * tilePixelSize;
         for (Section section : newSections) {
             if (!section.allTiles && section.depth == 0) {
-                y = layoutFolderSection(section, newSections, y, width);
+                y = layoutFolderSection(section, newSections, y, width, flowColumns);
             }
         }
         allTiles.headerBounds = new Rectangle(0, y, width, headerHeight);
@@ -788,7 +806,7 @@ public class TileSelector extends JPanel {
             allTiles.bodyBounds = new Rectangle(0, y, width, 0);
         } else {
             int bodyStart = y;
-            y = flowTiles(allTiles, allTiles.tileIndices, y, maxCols);
+            y = flowTiles(allTiles, allTiles.tileIndices, y, flowColumns);
             allTiles.bodyBounds = new Rectangle(0, bodyStart, width, y - bodyStart);
             y += 3;
         }
@@ -803,7 +821,7 @@ public class TileSelector extends JPanel {
 
     /** Parent header, child folder trees, then the parent's own tile body. */
     private int layoutFolderSection(Section section, ArrayList<Section> allSections,
-            int y, int width) {
+            int y, int width, int flowColumns) {
         section.headerBounds = new Rectangle(0, y, width, headerHeight);
         y += headerHeight + 1;
         if (section.isCollapsed()) {
@@ -818,7 +836,7 @@ public class TileSelector extends JPanel {
             }
             String parentPath = Tileset.getParentFolderPath(child.folder.getPath());
             if (sectionPath.equals(parentPath)) {
-                y = layoutFolderSection(child, allSections, y, width);
+                y = layoutFolderSection(child, allSections, y, width, flowColumns);
             }
         }
 
@@ -826,7 +844,7 @@ public class TileSelector extends JPanel {
         if (section.columns > 0) {
             y = layoutSlotGrid(section, y);
         } else {
-            y = flowTiles(section, section.tileIndices, y, maxCols);
+            y = flowTiles(section, section.tileIndices, y, flowColumns);
         }
         section.bodyBounds = new Rectangle(0, bodyStart, width, y - bodyStart);
         return y + 3;

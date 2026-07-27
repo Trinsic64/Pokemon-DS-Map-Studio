@@ -41,6 +41,26 @@ public final class GlobalMapOperations {
         return changed;
     }
 
+    /** Removes matching tile A occurrences while preserving height data. */
+    public static int deleteTiles(Map<Point, MapData> matrix, Set<Point> selectedMaps,
+                                  int[] layers, int tile,
+                                  Set<TileCell> excludedCells) {
+        int changed = 0;
+        for (Point mapCoords : selectedMaps) {
+            MapData mapData = matrix.get(mapCoords);
+            if (mapData != null) {
+                changed += deleteTiles(mapData.getGrid(), mapCoords, layers,
+                        tile, excludedCells);
+            }
+        }
+        return changed;
+    }
+
+    static int deleteTiles(MapGrid grid, Point mapCoords, int[] layers,
+                           int tile, Set<TileCell> excludedCells) {
+        return replaceTiles(grid, mapCoords, layers, tile, -1, false, excludedCells);
+    }
+
     static int replaceTiles(MapGrid grid, Point mapCoords, int[] layers,
                             int fromTile, int toTile, boolean swap,
                             Set<TileCell> excludedCells) {

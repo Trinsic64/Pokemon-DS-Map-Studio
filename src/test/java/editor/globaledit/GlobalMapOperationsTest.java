@@ -43,6 +43,24 @@ class GlobalMapOperationsTest {
     }
 
     @Test
+    void deletesOnlyIncludedFindTileOccurrencesAndKeepsHeights() {
+        MapGrid grid = new MapGrid(null);
+        Point map = new Point(2, 5);
+        grid.tileLayers[0][1][1] = 8;
+        grid.tileLayers[0][2][1] = 8;
+        grid.heightLayers[0][2][1] = 6;
+
+        int changed = GlobalMapOperations.deleteTiles(
+                grid, map, new int[]{0}, 8,
+                Collections.singleton(new GlobalMapOperations.TileCell(map, 0, 1, 1)));
+
+        assertEquals(1, changed);
+        assertEquals(8, grid.tileLayers[0][1][1]);
+        assertEquals(-1, grid.tileLayers[0][2][1]);
+        assertEquals(6, grid.heightLayers[0][2][1]);
+    }
+
+    @Test
     void copiesTileAndHeightLayoutsWithoutSharingArrays() {
         MapGrid grid = new MapGrid(null);
         grid.tileLayers[2][3][4] = 11;
