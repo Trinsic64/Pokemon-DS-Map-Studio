@@ -27,6 +27,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.IntConsumer;
 import javax.swing.SwingUtilities;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -94,6 +95,7 @@ public class TileSelector extends JPanel {
     private int readOnlySelectedIndex;
     private IntConsumer readOnlySelectionListener = index -> { };
     private Runnable readOnlyLayoutListener = () -> { };
+    private Set<Integer> readOnlyVisibleIndices;
 
     /** One displayed folder block: header bar + tile area. */
     private static class Section {
@@ -604,6 +606,7 @@ public class TileSelector extends JPanel {
         this.handler = handler;
         this.multiSelectionEnabled = false;
         this.readOnlySelectionMode = false;
+        this.readOnlyVisibleIndices = null;
 
         updateLayout();
     }
@@ -613,6 +616,7 @@ public class TileSelector extends JPanel {
         this.handler = handler;
         this.multiSelectionEnabled = false;
         this.readOnlySelectionMode = true;
+        this.readOnlyVisibleIndices = null;
         this.readOnlySelectedIndex = clampTileIndex(selectedIndex);
         this.readOnlySelectionListener = selectionListener == null
                 ? index -> { } : selectionListener;
@@ -631,6 +635,18 @@ public class TileSelector extends JPanel {
         }
         readOnlySelectedIndex = clampTileIndex(index);
         repaint();
+    }
+
+    /**
+     * Limits a read-only selector to the supplied tile IDs while retaining the
+     * normal folder hierarchy. Pass {@code null} to show the complete tileset.
+     */
+    public void setReadOnlyVisibleIndices(Set<Integer> indices) {
+        if (!readOnlySelectionMode) {
+            return;
+        }
+        readOnlyVisibleIndices = indices == null ? null : new LinkedHashSet<>(indices);
+        updateLayout();
     }
 
     private void setSelectedTileIndex(int index) {
@@ -702,7 +718,9 @@ public class TileSelector extends JPanel {
         }
         ArrayList<Integer> all = new ArrayList<>();
         for (int i = 0; i < handler.getTileset().size(); i++) {
-            all.add(i);
+            if (isVisibleInReadOnlyFilter(i)) {
+                all.add(i);
+            }
         }
         return flowTiles(null, all, 0, maxCols);
     }
@@ -736,6 +754,9 @@ public class TileSelector extends JPanel {
         newSections.add(allTiles);
 
         for (int i = 0; i < tset.size(); i++) {
+            if (!isVisibleInReadOnlyFilter(i)) {
+                continue;
+            }
             allTiles.tileIndices.add(i);
             for (String path : tset.get(i).getPaletteFolderSlots().keySet()) {
                 for (Section section : newSections) {
@@ -773,6 +794,11 @@ public class TileSelector extends JPanel {
         }
         sections = newSections;
         return y;
+    }
+
+    private boolean isVisibleInReadOnlyFilter(int tileIndex) {
+        return !readOnlySelectionMode || readOnlyVisibleIndices == null
+                || readOnlyVisibleIndices.contains(tileIndex);
     }
 
     /** Parent header, child folder trees, then the parent's own tile body. */

@@ -3,6 +3,9 @@ package editor.globaledit;
 import editor.grid.MapGrid;
 import org.junit.jupiter.api.Test;
 
+import java.awt.Point;
+import java.util.Collections;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class GlobalMapOperationsTest {
@@ -21,6 +24,22 @@ class GlobalMapOperationsTest {
         assertEquals(7, grid.tileLayers[0][0][0]);
         assertEquals(4, grid.tileLayers[0][1][0]);
         assertEquals(4, grid.tileLayers[1][0][0]);
+    }
+
+    @Test
+    void mapPreviewExclusionsSkipOnlyTheChosenOccurrence() {
+        MapGrid grid = new MapGrid(null);
+        Point map = new Point(3, 7);
+        grid.tileLayers[0][4][5] = 4;
+        grid.tileLayers[0][6][5] = 4;
+
+        int changed = GlobalMapOperations.replaceTiles(
+                grid, map, new int[]{0}, 4, 9, false,
+                Collections.singleton(new GlobalMapOperations.TileCell(map, 0, 4, 5)));
+
+        assertEquals(1, changed);
+        assertEquals(4, grid.tileLayers[0][4][5]);
+        assertEquals(9, grid.tileLayers[0][6][5]);
     }
 
     @Test
