@@ -40,6 +40,11 @@ application {
 compileJava.options.encoding = 'UTF-8'
 compileTestJava.options.encoding = 'UTF-8'
 
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
 jar {
     archiveFileName = "${rootProject.name}-${project.version}.jar"
     entryCompression = ZipEntryCompression.STORED
