@@ -14,6 +14,7 @@ import javax.xml.transform.TransformerException;
 
 import com.formdev.flatlaf.FlatDarculaLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import editor.globaledit.GlobalMapEditDialog;
 import editor.handler.MapData;
 import editor.handler.MapEditorHandler;
 import editor.heightselector.*;
@@ -55,6 +56,7 @@ public class MainFrame extends JFrame {
     private JToggleButton jtbModeEllipseShape;
     private JToggleButton jtbSmartTools;
     private JToggleButton jtbAutoCollision;
+    private JButton jbGlobalEdit;
     private JButton jbCopySelection;
     private JButton jbCutSelection;
     private JButton jbPasteSelection;
@@ -67,6 +69,7 @@ public class MainFrame extends JFrame {
     private JMenuItem jmiDeleteSelection;
     private JMenuItem jmiFillSelection;
     private JMenuItem jmiDeselect;
+    private JMenuItem jmiGlobalEdit;
     private JMenuItem jmiImportTileMetadata;
     private JMenuItem jmiExportTileMetadata;
     private JLabel jlCursorCoordsTitle;
@@ -216,6 +219,12 @@ public class MainFrame extends JFrame {
         jtbAutoCollision.addActionListener(e ->
                 mapDisplay.setAutoCollisionEnabled(jtbAutoCollision.isSelected()));
         applyToolButtonBackground(jtbAutoCollision);
+        jbGlobalEdit = new JButton("Global Edit...");
+        jbGlobalEdit.setFocusable(false);
+        jbGlobalEdit.setMargin(new Insets(2, 4, 2, 4));
+        jbGlobalEdit.setToolTipText("Replace tiles or edit layers across highlighted matrix chunks");
+        jbGlobalEdit.addActionListener(e -> openGlobalMapEditor());
+        applyToolButtonBackground(jbGlobalEdit);
 
         //Rebuild the tools toolbar as compact two column groups separated by
         //thin lines: draw / select / clipboard / fill-shape / camera / layer
@@ -283,6 +292,10 @@ public class MainFrame extends JFrame {
         jmiDeselect = new JMenuItem("Deselect");
         jmiDeselect.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.CTRL_DOWN_MASK));
         jmiDeselect.addActionListener(e -> mapDisplay.deselect());
+        jmiGlobalEdit = new JMenuItem("Global Map Editor...");
+        jmiGlobalEdit.setAccelerator(KeyStroke.getKeyStroke(
+                KeyEvent.VK_G, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
+        jmiGlobalEdit.addActionListener(e -> openGlobalMapEditor());
 
         JMenu tileMetadataMenu = new JMenu("Tile Metadata");
         jmiImportTileMetadata = new JMenuItem("Import Metadata...");
@@ -305,6 +318,8 @@ public class MainFrame extends JFrame {
         jmEdit.insert(jmiDeleteSelection, 15);
         jmEdit.insert(jmiFillSelection, 16);
         jmEdit.insert(jmiDeselect, 17);
+        jmEdit.insertSeparator(18);
+        jmEdit.insert(jmiGlobalEdit, 19);
 
         //Status bar: rename the selected map readout and add the cursor tile
         //coordinates next to it
@@ -333,7 +348,8 @@ public class MainFrame extends JFrame {
     private void addSmartToolsToolbarHeader() {
         int headerWidth = Math.max(toolGroupWidth, Math.max(
                 jtbSmartTools.getPreferredSize().width,
-                jtbAutoCollision.getPreferredSize().width));
+                Math.max(jtbAutoCollision.getPreferredSize().width,
+                        jbGlobalEdit.getPreferredSize().width)));
         if (headerWidth > toolGroupWidth) {
             for (Component component : jtTools.getComponents()) {
                 if (component instanceof JPanel) {
@@ -349,8 +365,11 @@ public class MainFrame extends JFrame {
         panel.setOpaque(false);
         panel.add(jtbSmartTools);
         panel.add(jtbAutoCollision);
+        panel.add(jbGlobalEdit);
         Dimension pref = new Dimension(toolGroupWidth,
-                jtbSmartTools.getPreferredSize().height + jtbAutoCollision.getPreferredSize().height + 2);
+                jtbSmartTools.getPreferredSize().height
+                        + jtbAutoCollision.getPreferredSize().height
+                        + jbGlobalEdit.getPreferredSize().height + 4);
         panel.setPreferredSize(pref);
         panel.setMaximumSize(pref);
         panel.setAlignmentX(0.0f);
@@ -362,6 +381,15 @@ public class MainFrame extends JFrame {
         jtTools.add(Box.createVerticalStrut(3), 1);
         jtTools.add(separator, 2);
         jtTools.add(Box.createVerticalStrut(3), 3);
+    }
+
+    private void openGlobalMapEditor() {
+        if (handler.getMapMatrix().getMatrix().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Open or create a map before using global editing.",
+                    "Global Map Editor", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        new GlobalMapEditDialog(this, handler).setVisible(true);
     }
 
     /** Adds a group of tool buttons to jtTools as a compact column block. */

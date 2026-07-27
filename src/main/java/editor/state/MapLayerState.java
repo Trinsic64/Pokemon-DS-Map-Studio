@@ -1,11 +1,13 @@
-
 package editor.state;
 
+import editor.grid.MapGrid;
 import editor.handler.MapData;
 import editor.handler.MapEditorHandler;
 
 import java.awt.Point;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -15,50 +17,82 @@ import java.util.Set;
 public class MapLayerState extends State {
 
     private final MapEditorHandler handler;
-    private final int layerIndex;
+    private final int[] layerIndices;
+    private final boolean fullState;
 
-    private final HashMap<Point, int[][]> mapTileLayers;
-    private final HashMap<Point, int[][]> mapHeightLayers;
-    private final HashMap<Point, byte[][][]> mapCollisionLayers;
-    //private int[][] tileLayer;
-    //private int[][] heightLayer;
+    private final HashMap<Integer, HashMap<Point, int[][]>> mapTileLayers = new HashMap<>();
+    private final HashMap<Integer, HashMap<Point, int[][]>> mapHeightLayers = new HashMap<>();
+    private final HashMap<Point, byte[][][]> mapCollisionLayers = new HashMap<>();
 
     public MapLayerState(String name, MapEditorHandler handler) {
         this(name, handler, true);
     }
 
     public MapLayerState(String name, MapEditorHandler handler, boolean fullState) {
+        this(name, handler, fullState, null, handler.getActiveLayerIndex());
+    }
+
+    public MapLayerState(String name, MapEditorHandler handler, int... layerIndices) {
+        this(name, handler, true, null, layerIndices);
+    }
+
+    public MapLayerState(String name, MapEditorHandler handler, boolean fullState, int... layerIndices) {
+        this(name, handler, fullState, null, layerIndices);
+    }
+
+    public MapLayerState(String name, MapEditorHandler handler, Set<Point> mapCoords,
+                         int... layerIndices) {
+        this(name, handler, false, mapCoords, layerIndices);
+    }
+
+    private MapLayerState(String name, MapEditorHandler handler, boolean fullState,
+                          Set<Point> requestedMaps, int... layerIndices) {
         super(name);
-
         this.handler = handler;
-        this.layerIndex = handler.getActiveLayerIndex();
+        this.fullState = fullState;
+        this.layerIndices = normalizeLayerIndices(layerIndices, handler.getActiveLayerIndex());
 
-        mapTileLayers = new HashMap<>();
-        mapHeightLayers = new HashMap<>();
-        mapCollisionLayers = new HashMap<>();
-        if (fullState) {
-            for (Map.Entry<Point, MapData> mapEntry : handler.getMapMatrix().getMatrix().entrySet()) {
-                mapTileLayers.put(mapEntry.getKey(), mapEntry.getValue().getGrid().cloneTileLayer(layerIndex));
-                mapHeightLayers.put(mapEntry.getKey(), mapEntry.getValue().getGrid().cloneHeightLayer(layerIndex));
-                mapCollisionLayers.put(mapEntry.getKey(), cloneCollisionLayers(mapEntry.getValue()));
-            }
+        Set<Point> maps;
+        if (requestedMaps != null) {
+            maps = requestedMaps;
+        } else if (fullState) {
+            maps = handler.getMapMatrix().getMatrix().keySet();
         } else {
-            mapTileLayers.put(handler.getMapSelected(), handler.getGrid().cloneTileLayer(layerIndex));
-            mapHeightLayers.put(handler.getMapSelected(), handler.getGrid().cloneHeightLayer(layerIndex));
-            mapCollisionLayers.put(handler.getMapSelected(), cloneCollisionLayers(handler.getCurrentMap()));
+            maps = java.util.Collections.singleton(handler.getMapSelected());
         }
-
+        for (int layerIndex : this.layerIndices) {
+            HashMap<Point, int[][]> tileLayers = new HashMap<>();
+            HashMap<Point, int[][]> heightLayers = new HashMap<>();
+            for (Point mapCoords : maps) {
+                MapData mapData = handler.getMapMatrix().getMap(mapCoords);
+                if (mapData != null) {
+                    Point key = new Point(mapCoords);
+                    tileLayers.put(key, mapData.getGrid().cloneTileLayer(layerIndex));
+                    heightLayers.put(key, mapData.getGrid().cloneHeightLayer(layerIndex));
+                }
+            }
+            mapTileLayers.put(layerIndex, tileLayers);
+            mapHeightLayers.put(layerIndex, heightLayers);
+        }
+        for (Point mapCoords : maps) {
+            MapData mapData = handler.getMapMatrix().getMap(mapCoords);
+            if (mapData != null) {
+                mapCollisionLayers.put(new Point(mapCoords), cloneCollisionLayers(mapData));
+            }
+        }
     }
 
     @Override
     public void revertState() {
-        //BDHC and other auxiliary formats are not part of map drawing undo.
-
-        for (Map.Entry<Point, int[][]> mapEntry : mapTileLayers.entrySet()) {
-            handler.getMapMatrix().getMapAndCreate(mapEntry.getKey()).getGrid().setTileLayer(layerIndex, mapEntry.getValue());
-        }
-        for (Map.Entry<Point, int[][]> mapEntry : mapHeightLayers.entrySet()) {
-            handler.getMapMatrix().getMapAndCreate(mapEntry.getKey()).getGrid().setHeightLayer(layerIndex, mapEntry.getValue());
+        for (int layerIndex : layerIndices) {
+            for (Map.Entry<Point, int[][]> mapEntry : mapTileLayers.get(layerIndex).entrySet()) {
+                handler.getMapMatrix().getMapAndCreate(mapEntry.getKey()).getGrid()
+                        .setTileLayer(layerIndex, mapEntry.getValue());
+            }
+            for (Map.Entry<Point, int[][]> mapEntry : mapHeightLayers.get(layerIndex).entrySet()) {
+                handler.getMapMatrix().getMapAndCreate(mapEntry.getKey()).getGrid()
+                        .setHeightLayer(layerIndex, mapEntry.getValue());
+            }
         }
         for (Map.Entry<Point, byte[][][]> mapEntry : mapCollisionLayers.entrySet()) {
             MapData mapData = handler.getMapMatrix().getMapAndCreate(mapEntry.getKey());
@@ -68,29 +102,41 @@ public class MapLayerState extends State {
             }
         }
 
-        //Remove maps that were not used
-        handler.getMapMatrix().getMatrix().entrySet().removeIf(entry -> !mapTileLayers.containsKey(entry.getKey()));
-        
-        /*
-        for(MapData mapData : handler.getMapMatrix().getMatrix().values()){
-            mapData.getGrid().updateAllMapLayers(handler.useRealTimePostProcessing());
-        }*/
-
-        //handler.getGrid().setTileLayer(layerIndex, tileLayer);
-        //handler.getGrid().setHeightLayer(layerIndex, heightLayer);
+        if (fullState) {
+            Set<Point> savedMaps = getKeySet();
+            handler.getMapMatrix().getMatrix().entrySet()
+                    .removeIf(entry -> !savedMaps.contains(entry.getKey()));
+        }
     }
 
     public void updateState() {
-        if (!mapTileLayers.containsKey(handler.getMapSelected())) {
-            mapTileLayers.put(handler.getMapSelected(), handler.getGrid().cloneTileLayer(layerIndex));
+        Point selectedMap = handler.getMapSelected();
+        MapData mapData = handler.getMapMatrix().getMap(selectedMap);
+        if (mapData == null) {
+            return;
         }
-        if (!mapHeightLayers.containsKey(handler.getMapSelected())) {
-            mapHeightLayers.put(handler.getMapSelected(), handler.getGrid().cloneHeightLayer(layerIndex));
+        for (int layerIndex : layerIndices) {
+            HashMap<Point, int[][]> tileLayers = mapTileLayers.get(layerIndex);
+            HashMap<Point, int[][]> heightLayers = mapHeightLayers.get(layerIndex);
+            tileLayers.putIfAbsent(new Point(selectedMap), mapData.getGrid().cloneTileLayer(layerIndex));
+            heightLayers.putIfAbsent(new Point(selectedMap), mapData.getGrid().cloneHeightLayer(layerIndex));
         }
-        if (!mapCollisionLayers.containsKey(handler.getMapSelected())) {
-            mapCollisionLayers.put(handler.getMapSelected(), cloneCollisionLayers(handler.getCurrentMap()));
-        }
+        mapCollisionLayers.putIfAbsent(new Point(selectedMap), cloneCollisionLayers(mapData));
+    }
 
+    private static int[] normalizeLayerIndices(int[] indices, int activeLayer) {
+        LinkedHashSet<Integer> normalized = new LinkedHashSet<>();
+        if (indices != null) {
+            for (int index : indices) {
+                if (index >= 0 && index < MapGrid.numLayers) {
+                    normalized.add(index);
+                }
+            }
+        }
+        if (normalized.isEmpty()) {
+            normalized.add(activeLayer);
+        }
+        return normalized.stream().mapToInt(Integer::intValue).toArray();
     }
 
     private static byte[][][] cloneCollisionLayers(MapData mapData) {
@@ -105,17 +151,24 @@ public class MapLayerState extends State {
     private static byte[][] cloneLayer(byte[][] layer) {
         byte[][] copy = new byte[layer.length][];
         for (int i = 0; i < layer.length; i++) {
-            copy[i] = java.util.Arrays.copyOf(layer[i], layer[i].length);
+            copy[i] = Arrays.copyOf(layer[i], layer[i].length);
         }
         return copy;
     }
 
     public int getLayerIndex() {
-        return layerIndex;
+        return layerIndices[0];
+    }
+
+    public int[] getLayerIndices() {
+        return Arrays.copyOf(layerIndices, layerIndices.length);
+    }
+
+    public boolean isFullState() {
+        return fullState;
     }
 
     public Set<Point> getKeySet() {
-        return mapTileLayers.keySet();
+        return new LinkedHashSet<>(mapCollisionLayers.keySet());
     }
-
 }
