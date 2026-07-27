@@ -173,8 +173,7 @@ public class ThumbnailLayerSelector extends JPanel {
                     itemPasteTiles.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/pasteTileIcon.png")));
                     itemPasteHeights.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/pasteHeightIcon.png")));
 
-                    itemShowLayer.setEnabled(!handler.renderLayers[index]
-                            || handler.getLayerOpacityPercent(index) < 100);
+                    itemShowLayer.setEnabled(!handler.renderLayers[index]);
                     itemHideLayer.setEnabled(handler.renderLayers[index]);
 
                     menu.add(itemShowLayer);
@@ -271,7 +270,9 @@ public class ThumbnailLayerSelector extends JPanel {
                     g.drawImage(layerThumbnails[i], 0, i * layerHeight, null);
                 }
 
-                int opacityShade = 100 - handler.getLayerOpacityPercent(i);
+                int opacityShade = handler.renderLayers[i]
+                        ? 100 - handler.getLayerOpacityPercent(i)
+                        : 100;
                 g.setColor(new Color(0, 0, 0, opacityShade));
                 if (handler.getActiveLayerIndex() == i) {
                     //g.setColor(new Color(255, 100, 100, 100));

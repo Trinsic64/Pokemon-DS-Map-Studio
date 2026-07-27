@@ -1,3 +1,18 @@
+# Pokemon DS Map Studio 2.4 - Integrated Development Build
+
+This build synchronizes the AdAstra v2.4 improvements with the Trinsic enhanced-tools line.
+
+## Integrated Editing Improvements
+
+- Added the **Global Map Editor** for visually selecting matrix chunks and applying tile replacement,
+  bidirectional swaps, layer copies, height adjustments, and layer clearing.
+- Added tile thumbnails and names to global replacement controls instead of relying on numeric IDs alone.
+- Added per-layer editor opacity controls that do not modify exported map data.
+- Global edits across multiple maps and layers are recorded as one undoable operation.
+- Preserved the v2.4 safe **Replace and Remap** workflow for project-wide tile-ID remapping.
+- Included the v2.4 toolbar, selection, exporter, collision-label, file-dialog, dependency, and move-permission fixes.
+- Restricted local JAR loading to the three required bundled libraries so stray or legacy JARs cannot alter builds.
+
 # Pokemon DS Map Studio 2.3.1 - Enhanced Tools Release
 
 ## Download and Packaging Improvements

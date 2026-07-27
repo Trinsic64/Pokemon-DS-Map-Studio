@@ -384,8 +384,10 @@ public class MapEditorHandler {
 
     public void setLayerState(int index, boolean status) {
         renderLayers[index] = status;
-        layerDisplaySettings.setOpacityPercent(index,
-                status ? LayerDisplaySettings.MAX_OPACITY : LayerDisplaySettings.MIN_OPACITY);
+        if (status && layerDisplaySettings.getOpacityPercent(index)
+                == LayerDisplaySettings.MIN_OPACITY) {
+            layerDisplaySettings.setOpacityPercent(index, LayerDisplaySettings.MAX_OPACITY);
+        }
     }
 
     public int getLayerOpacityPercent(int index) {
