@@ -1,5 +1,6 @@
 Place your legally obtained Nintendo g3dcvtr executable in this folder.
 It must be named exactly: g3dcvtr.exe
 
-The supporting DLL is already included. g3dcvtr.exe is not distributed with
+The tested converter build requires xerces-c_2_5_0.dll, which is included.
+xerces-c_2_8.dll may remain beside it. g3dcvtr.exe is not distributed with
 Pokemon DS Map Studio.

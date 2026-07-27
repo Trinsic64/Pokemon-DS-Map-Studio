@@ -37,4 +37,4 @@ sh -c "$(wget -O- https://raw.githubusercontent.com/AdAstra-LD/Pokemon-DS-Map-St
 ```
 
 ## Notes
-If you wish to export `.nsbmd` files, place your legally obtained `g3dcvtr.exe` in the release's `converter` folder. The release creates this folder and includes the supporting DLL and setup instructions, but cannot redistribute `g3dcvtr.exe`.
+If you wish to export `.nsbmd` files, place your legally obtained `g3dcvtr.exe` in the release's `converter` folder. Both supplied Xerces DLLs may remain in that folder; the tested converter build requires `xerces-c_2_5_0.dll` specifically. The release cannot redistribute `g3dcvtr.exe`.
