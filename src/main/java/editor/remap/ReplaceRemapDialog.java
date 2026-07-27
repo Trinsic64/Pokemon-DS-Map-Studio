@@ -80,7 +80,7 @@ public final class ReplaceRemapDialog extends JDialog {
     private SwingWorker<?, ?> worker;
 
     public ReplaceRemapDialog(Frame owner, MapEditorHandler handler) {
-        super(owner, "Replace and Remap", true);
+        super(owner, "Advanced Batch Remap", true);
         this.handler = handler;
         this.access = new PdsmsRemapProjectAccess(handler);
         initializeModels();

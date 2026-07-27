@@ -80,6 +80,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private final JComboBox<MapChoice> previewMapChoice = new JComboBox<>();
     private final JTextArea previewStats = new JTextArea(2, 20);
     private final JButton resetCellSelection = new JButton("Include all matches");
+    private final JCheckBox showMatchHighlights = new JCheckBox("Show matches");
     private final MapPreviewCanvas beforePreview;
     private final MapPreviewCanvas afterPreview;
     private final Set<GlobalMapOperations.TileCell> excludedMatches = new LinkedHashSet<>();
@@ -484,9 +485,17 @@ public final class GlobalMapEditDialog extends JDialog {
         controls.add(resetCellSelection);
         controls.add(Box.createVerticalStrut(4));
 
+        showMatchHighlights.setFocusable(false);
+        showMatchHighlights.setAlignmentX(Component.LEFT_ALIGNMENT);
+        showMatchHighlights.setToolTipText(
+                "Outline included matches on Current Map; Preview Map always stays clean");
+        showMatchHighlights.addActionListener(e -> beforePreview.repaint());
+        controls.add(showMatchHighlights);
+        controls.add(Box.createVerticalStrut(4));
+
         JLabel clickHelp = new JLabel("A: click \u00b7 B: Shift \u00b7 Toggle: Ctrl/right");
         clickHelp.setToolTipText("Use Current Map to pick visible tiles or toggle "
-                + "individual highlighted matches");
+                + "individual matches; enable Show matches when refining the cell scope");
         clickHelp.setAlignmentX(Component.LEFT_ALIGNMENT);
         controls.add(clickHelp);
         panel.add(controls, BorderLayout.NORTH);
@@ -1889,6 +1898,9 @@ public final class GlobalMapEditDialog extends JDialog {
 
         private void drawAffectedCells(Graphics2D g2, MapData data) {
             if (operations.getSelectedIndex() == 0) {
+                if (after) {
+                    return;
+                }
                 for (int x = 0; x < MapGrid.cols; x++) {
                     for (int y = 0; y < MapGrid.rows; y++) {
                         ArrayList<GlobalMapOperations.TileCell> matches =
@@ -1897,7 +1909,9 @@ public final class GlobalMapEditDialog extends JDialog {
                             continue;
                         }
                         boolean allExcluded = excludedMatches.containsAll(matches);
-                        drawCellState(g2, x, y, allExcluded);
+                        if (allExcluded || showMatchHighlights.isSelected()) {
+                            drawCellState(g2, x, y, allExcluded);
+                        }
                     }
                 }
             } else if (after && (operations.getSelectedIndex() == 2
@@ -1923,12 +1937,14 @@ public final class GlobalMapEditDialog extends JDialog {
 
         private void drawCellState(Graphics2D g2, int x, int y, boolean excluded) {
             Rectangle cell = cellBounds(x, y);
-            g2.setColor(excluded ? new Color(220, 60, 60, 105)
-                    : new Color(0, 235, 255, after ? 65 : 100));
-            g2.fillRect(cell.x, cell.y, cell.width, cell.height);
+            if (excluded) {
+                g2.setColor(new Color(220, 60, 60, 105));
+                g2.fillRect(cell.x, cell.y, cell.width, cell.height);
+            }
             g2.setColor(excluded ? new Color(255, 90, 90)
-                    : new Color(0, 245, 255));
-            g2.setStroke(new BasicStroke(Math.max(1.5f, mapBounds.width / 320f)));
+                    : new Color(0, 235, 255, 175));
+            g2.setStroke(new BasicStroke(excluded
+                    ? Math.max(1.5f, mapBounds.width / 320f) : 1f));
             g2.drawRect(cell.x, cell.y,
                     Math.max(0, cell.width - 1), Math.max(0, cell.height - 1));
             if (excluded) {

@@ -328,18 +328,21 @@ public class MainFrame extends JFrame {
         jmEdit.insert(jmiFillSelection, 16);
         jmEdit.insert(jmiDeselect, 17);
 
-        jmiReplaceRemap = new JMenuItem("Replace and Remap...");
+        jmiReplaceRemap = new JMenuItem("Advanced Batch Remap...");
         jmiReplaceRemap.setIcon(new ImageIcon(getClass().getResource("/icons/ReplaceIcon.png")));
-        jmiReplaceRemap.setToolTipText("Preview and replace tile IDs across maps and layers");
+        jmiReplaceRemap.setToolTipText(
+                "Batch several tile replacements and remap collision permissions or types");
         jmiReplaceRemap.addActionListener(e -> toolDialogLauncher.openReplaceRemap());
         jmiGlobalEdit = new JMenuItem("Global Map Editor...");
         jmiGlobalEdit.setAccelerator(KeyStroke.getKeyStroke(
                 KeyEvent.VK_G, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
+        jmiGlobalEdit.setToolTipText(
+                "Visually edit tiles, layers, heights, and selected matrix chunks");
         jmiGlobalEdit.addActionListener(e -> openGlobalMapEditor());
         int settingsIndex = jmEdit.getPopupMenu().getComponentIndex(menuItem1);
         jmEdit.insertSeparator(settingsIndex);
-        jmEdit.insert(jmiReplaceRemap, settingsIndex + 1);
-        jmEdit.insert(jmiGlobalEdit, settingsIndex + 2);
+        jmEdit.insert(jmiGlobalEdit, settingsIndex + 1);
+        jmEdit.insert(jmiReplaceRemap, settingsIndex + 2);
 
         //Status bar: rename the selected map readout and add the cursor tile
         //coordinates next to it
