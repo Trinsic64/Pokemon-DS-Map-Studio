@@ -40,7 +40,6 @@ public final class GlobalMapEditDialog extends JDialog {
     private final MatrixSelectionPanel matrixSelection;
     private final JCheckBox[] layerChecks = new JCheckBox[MapGrid.numLayers];
     private final LayerScopePreview[] layerPreviews = new LayerScopePreview[MapGrid.numLayers];
-    private final JTabbedPane mapViewTabs = new JTabbedPane();
     private final JTabbedPane operations = new JTabbedPane();
     private final JLabel status = new JLabel("Choose chunks, layers, and an operation.");
     private final JLabel operationHint = new JLabel(" ");
@@ -201,21 +200,21 @@ public final class GlobalMapEditDialog extends JDialog {
         panel.add(createLayerScopePanel(), gbc);
 
         gbc.gridx = 1;
-        gbc.weightx = 0.14;
+        gbc.weightx = 0;
         panel.add(createTileBrowserPanel(
-                "A. Find tile", sourceBrowser, sourceSummary, true), gbc);
+                "A. Find", sourceBrowser, sourceSummary, true), gbc);
 
         gbc.gridx = 2;
-        gbc.weightx = 0.46;
+        gbc.weightx = 1;
         panel.add(createCenterWorkspace(), gbc);
 
         gbc.gridx = 3;
-        gbc.weightx = 0.14;
+        gbc.weightx = 0;
         panel.add(createTileBrowserPanel(
-                "B. Replacement tile", replacementBrowser, replacementSummary, false), gbc);
+                "B. Replace", replacementBrowser, replacementSummary, false), gbc);
 
         gbc.gridx = 4;
-        gbc.weightx = 0.26;
+        gbc.weightx = 0;
         gbc.insets = new Insets(0, 0, 0, 0);
         panel.add(createRightRail(), gbc);
         return panel;
@@ -225,8 +224,8 @@ public final class GlobalMapEditDialog extends JDialog {
                                                JLabel summary, boolean source) {
         JPanel panel = new JPanel(new BorderLayout(4, 4));
         panel.setBorder(BorderFactory.createTitledBorder(title));
-        panel.setPreferredSize(new Dimension(185, 720));
-        panel.setMinimumSize(new Dimension(145, 420));
+        panel.setPreferredSize(new Dimension(145, 720));
+        panel.setMinimumSize(new Dimension(120, 420));
 
         JPanel controls = new JPanel();
         controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
@@ -297,7 +296,7 @@ public final class GlobalMapEditDialog extends JDialog {
         summary.setBorder(new EmptyBorder(3, 2, 1, 2));
         summary.setHorizontalAlignment(SwingConstants.CENTER);
         summary.setVerticalAlignment(SwingConstants.TOP);
-        summary.setPreferredSize(new Dimension(140, 48));
+        summary.setPreferredSize(new Dimension(115, 48));
 
         JPanel footer = new JPanel(new BorderLayout(3, 3));
         footer.add(summary, BorderLayout.NORTH);
@@ -308,7 +307,7 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private JComponent createCenterWorkspace() {
         JPanel panel = new JPanel(new BorderLayout(6, 6));
-        panel.setMinimumSize(new Dimension(540, 480));
+        panel.setMinimumSize(new Dimension(620, 480));
         panel.add(createMapHeaderPanel(), BorderLayout.NORTH);
         panel.add(createMapPreviewPanel(), BorderLayout.CENTER);
         panel.add(createOperationPanel(), BorderLayout.SOUTH);
@@ -318,7 +317,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private JPanel createMatrixPanel() {
         JPanel panel = new JPanel(new BorderLayout(4, 4));
         panel.setBorder(BorderFactory.createTitledBorder("Matrix"));
-        panel.setPreferredSize(new Dimension(430, 530));
+        panel.setPreferredSize(new Dimension(390, 475));
 
         JPanel selectionButtons = new JPanel(new GridLayout(1, 3, 4, 0));
         JButton selectAll = new JButton("All");
@@ -373,8 +372,8 @@ public final class GlobalMapEditDialog extends JDialog {
         matrixFooter.add(zoomControls);
 
         JScrollPane scrollPane = new JScrollPane(matrixSelection);
-        scrollPane.setPreferredSize(new Dimension(400, 400));
-        scrollPane.setMinimumSize(new Dimension(300, 300));
+        scrollPane.setPreferredSize(new Dimension(350, 350));
+        scrollPane.setMinimumSize(new Dimension(280, 280));
         scrollPane.getHorizontalScrollBar().setUnitIncrement(32);
         scrollPane.getVerticalScrollBar().setUnitIncrement(32);
         JPanel squareViewport = new JPanel(new GridBagLayout());
@@ -425,30 +424,28 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private JPanel createMapPreviewPanel() {
-        JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createLineBorder(
-                UIManager.getColor("Separator.foreground") == null
-                        ? Color.GRAY : UIManager.getColor("Separator.foreground")));
+        JPanel panel = new JPanel(new GridLayout(1, 2, 8, 0));
 
         JPanel currentPanel = new JPanel(new BorderLayout());
+        currentPanel.setBorder(BorderFactory.createTitledBorder("Current Map"));
+        currentPanel.setToolTipText(
+                "Click to pick A, Shift-click to pick B, or Ctrl/right-click a match");
         currentPanel.add(beforePreview, BorderLayout.CENTER);
-        mapViewTabs.addTab("Current Map", currentPanel);
-        mapViewTabs.setToolTipTextAt(0,
-                "Click to pick A, Shift-click to pick B, or Ctrl/right-click a match.");
+        panel.add(currentPanel);
 
         JPanel previewPanel = new JPanel(new BorderLayout());
+        previewPanel.setBorder(BorderFactory.createTitledBorder("Preview Map"));
+        previewPanel.setToolTipText(
+                "The selected operation rendered beside the unmodified map");
         previewPanel.add(afterPreview, BorderLayout.CENTER);
-        mapViewTabs.addTab("Preview Map", previewPanel);
-        mapViewTabs.setToolTipTextAt(1,
-                "The same map rendered with the selected operation applied.");
-        panel.add(mapViewTabs, BorderLayout.CENTER);
+        panel.add(previewPanel);
         return panel;
     }
 
     private JPanel createRightRail() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setPreferredSize(new Dimension(440, 720));
-        panel.setMinimumSize(new Dimension(360, 560));
+        panel.setPreferredSize(new Dimension(400, 720));
+        panel.setMinimumSize(new Dimension(330, 520));
         panel.add(createMatrixPanel(), BorderLayout.NORTH);
         panel.add(createScopeSettingsPanel(), BorderLayout.CENTER);
         panel.add(createActionButtons(), BorderLayout.SOUTH);
