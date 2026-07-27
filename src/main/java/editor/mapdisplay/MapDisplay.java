@@ -63,6 +63,7 @@ import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
+import java.awt.Toolkit;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -162,6 +163,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     //Keyboard events
     protected boolean CONTROL_PRESSED = false;
     protected boolean SHIFT_PRESSED = false;
+    protected boolean CTRL_PRESSED = false;
 
     //Height map
     protected float heightMapOpacity = 1.0f;
@@ -192,7 +194,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         MODE_INV_SMART_PAINT(Utils.loadCursor("/cursors/smartGridInvertedCursor.png")),
         MODE_SELECT(new Cursor(Cursor.CROSSHAIR_CURSOR)),
         MODE_SELECT_LASSO(new Cursor(Cursor.CROSSHAIR_CURSOR)),
-        MODE_SELECT_WAND(new Cursor(Cursor.CROSSHAIR_CURSOR)),
+        MODE_SELECT_WAND(createWandCursor()),
         MODE_MOVE_SELECT(new Cursor(Cursor.MOVE_CURSOR)),
         MODE_BUCKET(Utils.loadCursor("/cursors/floodFillIcon.png")),
         MODE_PICKER(Utils.loadCursor("/cursors/grabColorCursor.png")),
@@ -204,6 +206,30 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
         private EditMode(Cursor cursor) {
             this.cursor = cursor;
+        }
+
+        /** Wand cursor drawn like the toolbar wand icon, sparkle tip as hotspot. */
+        private static Cursor createWandCursor() {
+            BufferedImage img = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setStroke(new BasicStroke(3, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g.setColor(new Color(150, 100, 40));
+            g.drawLine(22, 22, 8, 8);
+            g.setColor(new Color(255, 210, 60));
+            g.setStroke(new BasicStroke(2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            int cx = 8, cy = 8;
+            g.drawLine(cx - 6, cy, cx + 6, cy);
+            g.drawLine(cx, cy - 6, cx, cy + 6);
+            g.drawLine(cx - 4, cy - 4, cx + 4, cy + 4);
+            g.drawLine(cx - 4, cy + 4, cx + 4, cy - 4);
+            g.dispose();
+            try {
+                return Toolkit.getDefaultToolkit().createCustomCursor(img, new Point(8, 8), "wand");
+            } catch (Exception ex) {
+                return new Cursor(Cursor.CROSSHAIR_CURSOR);
+            }
         }
 
     }
@@ -257,10 +283,21 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     //Selection context menu
     protected javax.swing.JPopupMenu selectionPopupMenu = null;
 
+    //Marching ants animation for the selection outline
+    private float antsPhase = 0;
+    private final javax.swing.Timer antsTimer = new javax.swing.Timer(75, e -> {
+        if (hasSelection() && isOrthoView() && isShowing()) {
+            antsPhase = (antsPhase + 1) % 8;
+            repaint();
+        }
+    });
+
     public MapDisplay() {
         //Set default display size
         setPreferredSize(new Dimension(width, height));
         setSize(new Dimension(width, height));
+
+        antsTimer.start();
 
         //Add listeners
         addGLEventListener(this);
@@ -470,6 +507,15 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                 break;
             case KeyEvent.VK_SHIFT:
                 SHIFT_PRESSED = true;
+                //Temporary rectangle selection: show the select tool cursor
+                //(the wand keeps its own cursor; Shift there selects matching)
+                if (isOrthoView() && editMode != EditMode.MODE_SELECT_WAND) {
+                    setCursor(EditMode.MODE_SELECT.cursor);
+                }
+                repaint();
+                break;
+            case KeyEvent.VK_CONTROL:
+                CTRL_PRESSED = true;
                 break;
             case KeyEvent.VK_E:
                 setEditMode(EditMode.MODE_EDIT);
@@ -576,6 +622,12 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
             SHIFT_PRESSED = false;
             //disableCameraMove();
             repaint();
+        } else if (e.getKeyCode() == KeyEvent.VK_CONTROL) {
+            CTRL_PRESSED = false;
+            repaint();
+        }
+        if (e.getKeyCode() == KeyEvent.VK_SHIFT) {
+            setCursor(editMode.cursor);
         }
 
     }
@@ -1337,11 +1389,22 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         }
     }
 
+    /**
+     * Middle click flood fills only act inside the current selection;
+     * clicking an unselected cell does nothing.
+     */
+    private boolean isInsideSelectionOnSelectedMap(Point p) {
+        return hasSelection() && selection.getMapCoords().equals(handler.getMapSelected())
+                && selection.contains(p.x, p.y);
+    }
+
     protected void floodFillClearTileInGrid(MouseEvent e) {
         if (handler.getTileset().size() > 0) {
             Point p = getCoordsInSelectedMap(e);
-            if (isPointInsideGrid(p.x, p.y) && handler.getActiveTileLayer()[p.x][p.y] != -1) {
-                handler.getGrid().floodFillTileGrid(p.x, p.y, -1, 1, 1);
+            if (isPointInsideGrid(p.x, p.y) && handler.getActiveTileLayer()[p.x][p.y] != -1
+                    && isInsideSelectionOnSelectedMap(p)) {
+                handler.addMapState(new MapLayerState("Flood Fill Clear Tile", handler));
+                handler.getGrid().floodFillTileGrid(p.x, p.y, -1, 1, 1, selection.getMask());
                 //updateMapThumbnail(e);
             }
         }
@@ -1350,9 +1413,12 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     protected void floodFillTileInGrid(MouseEvent e) {
         if (handler.getTileset().size() > 0) {
             Point p = getCoordsInSelectedMap(e);
-            if (isPointInsideGrid(p.x, p.y) && handler.getActiveTileLayer()[p.x][p.y] != handler.getTileIndexSelected()) {
+            if (isPointInsideGrid(p.x, p.y) && handler.getActiveTileLayer()[p.x][p.y] != handler.getTileIndexSelected()
+                    && isInsideSelectionOnSelectedMap(p)) {
+                handler.addMapState(new MapLayerState("Flood Fill Tile", handler));
                 Tile tile = handler.getTileSelected();
-                handler.getGrid().floodFillTileGrid(p.x, p.y, handler.getTileIndexSelected(), tile.getWidth(), tile.getHeight());
+                handler.getGrid().floodFillTileGrid(p.x, p.y, handler.getTileIndexSelected(),
+                        tile.getWidth(), tile.getHeight(), selection.getMask());
                 applyAutoCollision(handler.getMapSelected());
                 //updateMapThumbnail(e);
             }
@@ -2511,7 +2577,9 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         Graphics2D g2d = (Graphics2D) g;
         Stroke oldStroke = g2d.getStroke();
 
-        g2d.setColor(new Color(70, 150, 255, 50));
+        //A lighter fill while moving the selection keeps the tiles readable
+        int fillAlpha = editMode == EditMode.MODE_MOVE_SELECT ? 18 : 50;
+        g2d.setColor(new Color(70, 150, 255, fillAlpha));
         for (int i = 0; i < cols; i++) {
             for (int j = 0; j < rows; j++) {
                 if (mask[i][j]) {
@@ -2524,7 +2592,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         //Border segments where a selected cell has an unselected neighbor
         Stroke solid = new BasicStroke(1);
         Stroke dashed = new BasicStroke(1, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
-                10.0f, new float[]{4.0f, 4.0f}, 0.0f);
+                10.0f, new float[]{4.0f, 4.0f}, antsPhase);
         for (int i = 0; i < cols; i++) {
             for (int j = 0; j < rows; j++) {
                 if (!mask[i][j]) {
@@ -2548,17 +2616,18 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         for (int pass = 0; pass < 2; pass++) {
             g2d.setStroke(pass == 0 ? solid : dashed);
             g2d.setColor(pass == 0 ? Color.black : Color.white);
+            //Clockwise winding so the animated dashes march around the outline
             if (top) {
                 g2d.drawLine(px, py, px + tileSize, py);
             }
-            if (bottom) {
-                g2d.drawLine(px, py + tileSize, px + tileSize, py + tileSize);
-            }
-            if (left) {
-                g2d.drawLine(px, py, px, py + tileSize);
-            }
             if (right) {
                 g2d.drawLine(px + tileSize, py, px + tileSize, py + tileSize);
+            }
+            if (bottom) {
+                g2d.drawLine(px + tileSize, py + tileSize, px, py + tileSize);
+            }
+            if (left) {
+                g2d.drawLine(px, py + tileSize, px, py);
             }
         }
     }

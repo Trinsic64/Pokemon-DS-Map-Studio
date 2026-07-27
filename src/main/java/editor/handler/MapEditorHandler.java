@@ -13,6 +13,7 @@ import formats.collisions.Collisions;
 import editor.game.Game;
 import editor.smartdrawing.SmartGrid;
 import editor.state.MapLayerState;
+import editor.state.MapState;
 import editor.state.StateHandler;
 
 import java.awt.Color;
@@ -34,7 +35,7 @@ import utils.Utils;
  */
 public class MapEditorHandler {
 
-    private static final String FALLBACK_VERSION = "2.3.0";
+    private static final String FALLBACK_VERSION = "2.4";
     public static final String versionName = "Pokemon DS Map Studio v"
             + getApplicationVersion() + " [AdAstra]";
 
@@ -447,7 +448,7 @@ public class MapEditorHandler {
         return mapStateHandler;
     }
 
-    public void addMapState(MapLayerState state) {
+    public void addMapState(MapState state) {
         mapStateHandler.addState(state);
         mainFrame.getUndoButton().setEnabled(true);
         mainFrame.getRedoButton().setEnabled(false);

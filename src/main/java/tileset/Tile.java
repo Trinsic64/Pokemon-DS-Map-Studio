@@ -625,28 +625,27 @@ public class Tile {
         ArrayList<Integer> textureIDsFixed = new ArrayList<>();
         for (int i = 0; i < textureIDs.size(); i++) {
             int id = textureIDs.get(i);
+            if (i >= fIndsQuadArray.size() || i >= fIndsTriArray.size()) {
+                System.out.println("OBJ import: no face group for material index " + i + " (texture ID " + id + ")");
+            }
             int index = textureIDsFixed.indexOf(id);
             if (index == -1) {
                 ArrayList<Face> fIndsQuad = new ArrayList<>();
                 ArrayList<Face> fIndsTri = new ArrayList<>();
-                for (int j = 0; j < fIndsQuadArray.get(i).size(); j++) {
-                    fIndsQuad.add(fIndsQuadArray.get(i).get(j));
-                }
-                for (int j = 0; j < fIndsTriArray.get(i).size(); j++) {
-                    fIndsTri.add(fIndsTriArray.get(i).get(j));
-                }
+                if (i < fIndsQuadArray.size())
+                    fIndsQuad.addAll(fIndsQuadArray.get(i));
+                if (i < fIndsTriArray.size())
+                    fIndsTri.addAll(fIndsTriArray.get(i));
                 fIndsQuadArrayFixed.add(fIndsQuad);
                 fIndsTriArrayFixed.add(fIndsTri);
                 textureIDsFixed.add(id);
             } else {
                 ArrayList<Face> fIndsQuad = fIndsQuadArrayFixed.get(index);
                 ArrayList<Face> fIndsTri = fIndsTriArrayFixed.get(index);
-                for (int j = 0; j < fIndsQuadArray.get(i).size(); j++) {
-                    fIndsQuad.add(fIndsQuadArray.get(i).get(j));
-                }
-                for (int j = 0; j < fIndsTriArray.get(i).size(); j++) {
-                    fIndsTri.add(fIndsTriArray.get(i).get(j));
-                }
+                if (i < fIndsQuadArray.size())
+                    fIndsQuad.addAll(fIndsQuadArray.get(i));
+                if (i < fIndsTriArray.size())
+                    fIndsTri.addAll(fIndsTriArray.get(i));
             }
         }
         textureIDs = textureIDsFixed;

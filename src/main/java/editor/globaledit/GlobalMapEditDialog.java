@@ -4,7 +4,7 @@ import editor.MainFrame;
 import editor.grid.MapGrid;
 import editor.handler.MapData;
 import editor.handler.MapEditorHandler;
-import editor.state.MapLayerState;
+import editor.state.GlobalMapEditState;
 import formats.collisions.CollisionDefaultsApplier;
 import tileset.Tile;
 
@@ -290,7 +290,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 ? new int[]{copyTargetLayer.getSelectedIndex()}
                 : layers;
         String stateName = operationName(tab);
-        MapLayerState before = new MapLayerState(stateName, handler, maps, snapshotLayers);
+        GlobalMapEditState before =
+                new GlobalMapEditState(stateName, handler, maps, snapshotLayers);
         int changed;
         int collisionChanges = 0;
 

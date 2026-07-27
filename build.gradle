@@ -6,22 +6,22 @@ plugins {
 
 repositories {
     mavenCentral()
-    flatDir {
-        dirs 'libs'
-    }
 }
 
 dependencies {
-    implementation files(
-            'libs/NitroSystemTool.jar',
-            'libs/graphicslib3D.jar',
-            'libs/jogamp-fat.jar'
-    )
-    implementation group: 'com.formdev', name: 'flatlaf', version: '0.39'
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation group: 'com.formdev', name: 'flatlaf', version: '3.7.2'
     implementation group: 'com.miglayout', name: 'miglayout-swing', version: '5.0'
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-version '2.3.0'
+test {
+    useJUnitPlatform()
+}
+
+version '2.4'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -59,4 +59,29 @@ distZip {
 
 distTar {
     archiveFileName = "${rootProject.name}-${project.version}.tar"
+}
+
+def releaseBaseName = "Pokemon.DS.Map.Studio-${project.version}"
+
+tasks.register('portableDist', Sync) {
+    dependsOn jar
+    into layout.buildDirectory.dir("portable/${releaseBaseName}")
+
+    from(tasks.named('jar')) {
+        rename { 'Pokemon DS Map Studio.jar' }
+    }
+    from('packaging/launchers')
+    from('converter') {
+        into 'converter'
+    }
+    from('README.md', 'RELEASE_NOTES.md')
+}
+
+tasks.register('portableZip', Zip) {
+    dependsOn tasks.named('portableDist')
+    archiveFileName = "${releaseBaseName}-Portable.zip"
+    destinationDirectory = layout.buildDirectory.dir('release')
+    from(layout.buildDirectory.dir("portable/${releaseBaseName}")) {
+        into releaseBaseName
+    }
 }

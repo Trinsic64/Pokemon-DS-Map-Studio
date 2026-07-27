@@ -14,6 +14,7 @@ import javax.xml.transform.TransformerException;
 
 import com.formdev.flatlaf.FlatDarculaLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import com.formdev.flatlaf.util.SystemFileChooser;
 import editor.globaledit.GlobalMapEditDialog;
 import editor.handler.MapData;
 import editor.handler.MapEditorHandler;
@@ -72,6 +73,7 @@ public class MainFrame extends JFrame {
     private JMenuItem jmiGlobalEdit;
     private JMenuItem jmiImportTileMetadata;
     private JMenuItem jmiExportTileMetadata;
+    private JMenuItem jmiReplaceRemap;
     private JLabel jlCursorCoordsTitle;
     private JLabel jlCursorCoords;
 
@@ -89,6 +91,23 @@ public class MainFrame extends JFrame {
                     UIManager.setLookAndFeel(new FlatDarculaLaf());
                     break;
             }
+            SystemFileChooser.setStateStore(new SystemFileChooser.StateStore() {
+                private static final String PREFIX = "fileChooser.";
+
+                @Override
+                public String get(String key, String def) {
+                    return prefs.get(PREFIX + key, def);
+                }
+
+                @Override
+                public void put(String key, String value) {
+                    if (value != null) {
+                        prefs.put(PREFIX + key, value);
+                    } else {
+                        prefs.remove(PREFIX + key);
+                    }
+                }
+            });
             loadRecentMaps();
         } catch (Exception ex) {
             System.err.println("Failed to initialize LaF");
@@ -227,7 +246,7 @@ public class MainFrame extends JFrame {
         applyToolButtonBackground(jbGlobalEdit);
 
         //Rebuild the tools toolbar as compact two column groups separated by
-        //thin lines: draw / select / clipboard / fill-shape / camera / layer
+        //thin lines: draw / select / clipboard / fill-shape
         toolGroupWidth = 0;
         jtTools.removeAll();
         jtTools.setLayout(new BoxLayout(jtTools, BoxLayout.Y_AXIS));
@@ -256,11 +275,35 @@ public class MainFrame extends JFrame {
 
         addToolGroup(2, jtbModeEdit, jtbModeClear, jtbModeSmartPaint, jtbModeInvSmartPaint);
         addToolGroup(2, jtbModeSelect, jtbModeLasso, jtbModeWand, jtbModeMoveSelect);
+        addDeselectRow();
         addSelectionActionGroup();
         addToolGroup(2, jtbModeBucket, jtbModePicker, jtbModeLine, jtbModeRectShape, jtbModeEllipseShape);
-        addToolGroup(2, jtbModeMove, jtbModeZoom, jbFitCameraToMap);
-        addToolGroup(1, jbMoveLayerUp, jbMoveLayerDown);
         addSmartToolsToolbarHeader();
+
+        //Camera controls live in the View group next to the view toggles,
+        //compacted into a two column grid; separators split the mutually
+        //exclusive view modes, the display toggles, and the camera tools
+        jtView.removeAll();
+        jtView.setLayout(new MigLayout("insets 0, gap 2 2, wrap 2", "[fill][fill]"));
+        jtView.add(jtbView3D);
+        jtView.add(jtbViewOrtho);
+        jtView.add(jtbViewHeight);
+        jtView.add(new JSeparator(), "newline, span 2, growx");
+        jtView.add(jtbViewGrid, "newline");
+        jtView.add(jtbViewWireframe);
+        jtView.add(new JSeparator(), "newline, span 2, growx");
+        jtView.add(jtbModeMove, "newline");
+        jtView.add(jtbModeZoom);
+        jtView.add(jbFitCameraToMap, "newline, span 2, growx");
+
+        //Layer up / down buttons sit at the bottom of the layer selector
+        JPanel jpLayerArrows = new JPanel(new GridLayout(1, 2, 2, 0));
+        jpLayerArrows.setOpaque(false);
+        jpLayerArrows.add(jbMoveLayerUp);
+        jpLayerArrows.add(jbMoveLayerDown);
+        jpLayer.setLayout(new BorderLayout());
+        jpLayer.add(thumbnailLayerSelector, BorderLayout.CENTER);
+        jpLayer.add(jpLayerArrows, BorderLayout.SOUTH);
 
         //Edit menu entries for the region selection
         jmiSelectAll = new JMenuItem("Select All");
@@ -292,10 +335,6 @@ public class MainFrame extends JFrame {
         jmiDeselect = new JMenuItem("Deselect");
         jmiDeselect.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.CTRL_DOWN_MASK));
         jmiDeselect.addActionListener(e -> mapDisplay.deselect());
-        jmiGlobalEdit = new JMenuItem("Global Map Editor...");
-        jmiGlobalEdit.setAccelerator(KeyStroke.getKeyStroke(
-                KeyEvent.VK_G, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
-        jmiGlobalEdit.addActionListener(e -> openGlobalMapEditor());
 
         JMenu tileMetadataMenu = new JMenu("Tile Metadata");
         jmiImportTileMetadata = new JMenuItem("Import Metadata...");
@@ -318,8 +357,19 @@ public class MainFrame extends JFrame {
         jmEdit.insert(jmiDeleteSelection, 15);
         jmEdit.insert(jmiFillSelection, 16);
         jmEdit.insert(jmiDeselect, 17);
-        jmEdit.insertSeparator(18);
-        jmEdit.insert(jmiGlobalEdit, 19);
+
+        jmiReplaceRemap = new JMenuItem("Replace and Remap...");
+        jmiReplaceRemap.setIcon(new ImageIcon(getClass().getResource("/icons/ReplaceIcon.png")));
+        jmiReplaceRemap.setToolTipText("Preview and replace tile IDs across maps and layers");
+        jmiReplaceRemap.addActionListener(e -> toolDialogLauncher.openReplaceRemap());
+        jmiGlobalEdit = new JMenuItem("Global Map Editor...");
+        jmiGlobalEdit.setAccelerator(KeyStroke.getKeyStroke(
+                KeyEvent.VK_G, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
+        jmiGlobalEdit.addActionListener(e -> openGlobalMapEditor());
+        int settingsIndex = jmEdit.getPopupMenu().getComponentIndex(menuItem1);
+        jmEdit.insertSeparator(settingsIndex);
+        jmEdit.insert(jmiReplaceRemap, settingsIndex + 1);
+        jmEdit.insert(jmiGlobalEdit, settingsIndex + 2);
 
         //Status bar: rename the selected map readout and add the cursor tile
         //coordinates next to it
@@ -429,6 +479,21 @@ public class MainFrame extends JFrame {
     }
 
     /** Four clipboard buttons followed by a full-width Deselect command. */
+    /** Full width Deselect row glued under the selection tools group. */
+    private void addDeselectRow() {
+        jbDeselect.setMargin(new Insets(2, 4, 2, 4));
+        applyToolButtonBackground(jbDeselect);
+        JPanel panel = new JPanel(new GridLayout(1, 1));
+        panel.setOpaque(false);
+        panel.add(jbDeselect);
+        Dimension pref = new Dimension(toolGroupWidth, jbDeselect.getPreferredSize().height + 2);
+        panel.setPreferredSize(pref);
+        panel.setMaximumSize(pref);
+        panel.setAlignmentX(0.0f);
+        jtTools.add(Box.createVerticalStrut(2));
+        jtTools.add(panel);
+    }
+
     private void addSelectionActionGroup() {
         if (jtTools.getComponentCount() > 0) {
             jtTools.add(Box.createVerticalStrut(3));
@@ -456,12 +521,6 @@ public class MainFrame extends JFrame {
             gbc.gridwidth = 1;
             panel.add(button, gbc);
         }
-        jbDeselect.setMargin(new Insets(2, 4, 2, 4));
-        applyToolButtonBackground(jbDeselect);
-        gbc.gridx = 0;
-        gbc.gridy = 2;
-        gbc.gridwidth = 2;
-        panel.add(jbDeselect, gbc);
         panel.setAlignmentX(0.0f);
         Dimension pref = panel.getPreferredSize();
         pref = new Dimension(toolGroupWidth, pref.height);
