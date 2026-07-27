@@ -44,6 +44,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private final JTabbedPane operations = new JTabbedPane();
     private final JLabel status = new JLabel("Choose chunks, layers, and an operation.");
     private final JLabel operationHint = new JLabel(" ");
+    private final JTextArea operationReview = new JTextArea();
 
     private final TileSelector sourceBrowser = new TileSelector();
     private final TileSelector replacementBrowser = new TileSelector();
@@ -528,7 +529,24 @@ public final class GlobalMapEditDialog extends JDialog {
         operations.addTab("Clear", createClearPanel());
         operations.setToolTipTextAt(3,
                 "Remove tile data and/or reset heights in checked layers.");
-        panel.add(operations, BorderLayout.CENTER);
+        JPanel operationWorkspace = new JPanel(new GridLayout(1, 2, 8, 0));
+        operationWorkspace.add(operations);
+        operationWorkspace.add(createOperationReviewPanel());
+        panel.add(operationWorkspace, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createOperationReviewPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createTitledBorder("Review"));
+        operationReview.setEditable(false);
+        operationReview.setFocusable(false);
+        operationReview.setOpaque(false);
+        operationReview.setLineWrap(true);
+        operationReview.setWrapStyleWord(true);
+        operationReview.setFont(UIManager.getFont("Label.font"));
+        operationReview.setMargin(new Insets(6, 8, 6, 8));
+        panel.add(operationReview, BorderLayout.CENTER);
         return panel;
     }
 
@@ -725,6 +743,8 @@ public final class GlobalMapEditDialog extends JDialog {
         occupiedOnly.addActionListener(e -> refreshPreview());
         clearTiles.addActionListener(e -> refreshPreview());
         clearHeights.addActionListener(e -> refreshPreview());
+        keepCollisions.addActionListener(e -> refreshPreview());
+        refreshCollisionDefaults.addActionListener(e -> refreshPreview());
         operations.addChangeListener(e -> {
             updateOperationHint();
             refreshPreview();
@@ -1075,6 +1095,7 @@ public final class GlobalMapEditDialog extends JDialog {
         beforePreview.repaint();
         afterPreview.repaint();
         updatePreviewStats();
+        updateOperationReview();
         resetCellSelection.setEnabled(!excludedMatches.isEmpty());
     }
 
@@ -1102,6 +1123,79 @@ public final class GlobalMapEditDialog extends JDialog {
             default:
                 previewStats.setText(" ");
         }
+    }
+
+    private void updateOperationReview() {
+        int tab = operations.getSelectedIndex();
+        int chunks = matrixSelection.getSelectedMaps().size();
+        int layers = selectedLayers().length;
+        String applyScope = chunks == 0
+                ? "Choose one or more matrix chunks."
+                : "Apply changes the shown chunk; Apply All changes all "
+                + chunks + " selected chunk" + plural(chunks) + ".";
+        StringBuilder review = new StringBuilder();
+
+        switch (tab) {
+            case 0:
+                int[] counts = countReplaceMatches(matrixSelection.getSelectedMaps());
+                String action = deleteMode.isSelected() ? "Delete tile A"
+                        : swapTiles.isSelected() ? "Swap tiles A and B"
+                        : "Replace tile A with tile B";
+                review.append(action).append('\n')
+                        .append(counts[1]).append(" included match")
+                        .append(plural(counts[1])).append(" across ")
+                        .append(layers).append(" checked layer")
+                        .append(plural(layers)).append(".\n");
+                if (counts[0] > counts[1]) {
+                    review.append(counts[0] - counts[1])
+                            .append(" match").append(plural(counts[0] - counts[1]))
+                            .append(" excluded manually.\n");
+                }
+                review.append('\n').append("Heights stay unchanged. ");
+                if (deleteMode.isSelected() || keepCollisions.isSelected()) {
+                    review.append("Existing collisions stay unchanged.");
+                } else {
+                    review.append("Smart collision defaults will be recalculated.");
+                }
+                review.append("\n\n").append(applyScope);
+                break;
+            case 1:
+                review.append("Copy Layer ")
+                        .append(copySourceLayer.getSelectedIndex() + 1)
+                        .append(" to Layer ")
+                        .append(copyTargetLayer.getSelectedIndex() + 1).append(".\n")
+                        .append(copyTiles.isSelected() ? "Tile layout included. " : "")
+                        .append(copyHeights.isSelected() ? "Height layout included." : "")
+                        .append("\n\nOnly the target layer is overwritten.\n\n")
+                        .append(applyScope);
+                break;
+            case 2:
+                int amount = (Integer) heightAmount.getValue();
+                review.append(amount >= 0 ? "Raise" : "Lower")
+                        .append(" checked-layer heights by ")
+                        .append(Math.abs(amount)).append(".\n")
+                        .append(occupiedOnly.isSelected()
+                                ? "Only occupied tile cells are affected."
+                                : "Empty and occupied cells are affected.")
+                        .append("\n\nValues remain inside the supported height range.\n\n")
+                        .append(applyScope);
+                break;
+            case 3:
+                review.append("Clear selected layer data.\n")
+                        .append(clearTiles.isSelected() ? "Tiles will be removed. " : "")
+                        .append(clearHeights.isSelected() ? "Heights will reset to zero." : "")
+                        .append("\n\nThis operation asks for confirmation and is undoable.\n\n")
+                        .append(applyScope);
+                break;
+            default:
+                review.append("Choose an operation.");
+        }
+        operationReview.setText(review.toString());
+        operationReview.setCaretPosition(0);
+    }
+
+    private static String plural(int count) {
+        return count == 1 ? "" : "s";
     }
 
     private int[] countReplaceMatches(Set<Point> maps) {

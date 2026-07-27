@@ -262,6 +262,8 @@ public class MainFrame extends JFrame {
                 "Paste Selection (Ctrl+V)", () -> mapDisplay.startPaste());
         jbDeleteSelection = createActionButton(new ImageIcon(createTrashIcon()),
                 "Delete Selected Tiles (Delete)", () -> mapDisplay.deleteSelection());
+        JButton jbGlobalEditShortcut = createActionButton(new ImageIcon(createGlobeIcon()),
+                "Global Map Editor (Ctrl+Shift+G)", this::openGlobalMapEditor);
         jbDeselect = new JButton("Deselect");
         jbDeselect.setToolTipText("Deselect (Ctrl+D)");
         jbDeselect.setFocusable(false);
@@ -271,7 +273,7 @@ public class MainFrame extends JFrame {
         addToolGroup(2, jtbModeSelect, jtbModeLasso, jtbModeWand, jtbModeMoveSelect);
         addSelectionActionGroup();
         addToolGroup(2, jtbModeBucket, jtbModePicker, jtbModeLine, jtbModeRectShape, jtbModeEllipseShape);
-        addToolGroup(2, jtbModeMove, jtbModeZoom, jbFitCameraToMap);
+        addToolGroup(2, jtbModeMove, jtbModeZoom, jbFitCameraToMap, jbGlobalEditShortcut);
         addToolGroup(1, jbMoveLayerUp, jbMoveLayerDown);
         addSmartToolsToolbarHeader();
 
@@ -674,6 +676,32 @@ public class MainFrame extends JFrame {
         g.drawLine(cx, cy - 7, cx + 3, cy - 4);
         g.drawLine(cx, cy + 7, cx - 3, cy + 4);
         g.drawLine(cx, cy + 7, cx + 3, cy + 4);
+        g.dispose();
+        return img;
+    }
+
+    private static java.awt.image.BufferedImage createGlobeIcon() {
+        java.awt.image.BufferedImage img = newIconImage();
+        Graphics2D g = iconGraphics(img);
+        g.setColor(new Color(40, 150, 215));
+        g.fillOval(4, 4, 24, 24);
+
+        g.setColor(new Color(89, 190, 92));
+        g.fillPolygon(new int[]{6, 11, 14, 13, 9, 6},
+                new int[]{8, 6, 9, 13, 14, 11}, 6);
+        g.fillPolygon(new int[]{18, 24, 26, 23, 22, 18, 16},
+                new int[]{8, 9, 13, 15, 20, 24, 18}, 7);
+        g.fillOval(8, 19, 7, 5);
+
+        g.setColor(new Color(225, 245, 255, 185));
+        g.setStroke(new BasicStroke(1.2f));
+        g.drawOval(10, 4, 12, 24);
+        g.drawOval(4, 10, 24, 12);
+        g.drawLine(4, 16, 28, 16);
+
+        g.setColor(ICON_DARK);
+        g.setStroke(new BasicStroke(2f));
+        g.drawOval(4, 4, 24, 24);
         g.dispose();
         return img;
     }
