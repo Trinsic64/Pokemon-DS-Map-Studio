@@ -84,6 +84,9 @@ tasks.register('portableDist', Sync) {
         into 'converter'
     }
     from('README.md', 'RELEASE_NOTES.md')
+    filesMatching(['**/*.bat', '**/*.md', '**/*.ps1', '**/*.sh', '**/*.txt']) {
+        filter { line -> line }
+    }
 }
 
 tasks.register('portableZip', Zip) {
