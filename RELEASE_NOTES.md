@@ -4,10 +4,11 @@
 
 - Added a ready-to-run Windows package with its own Java runtime and `.exe` launcher.
 - Added a portable ZIP with Windows and Linux/macOS launch scripts.
-- Included the expected root-level `converter` folder, supporting DLL, and setup instructions.
+- Included the expected root-level `converter` folder, Xerces runtime DLLs, and setup instructions.
 - Included README and release notes inside each distribution.
 - Added automated tagged releases and SHA-256 checksum generation.
 - `g3dcvtr.exe` remains user-supplied and is not redistributed.
+- Added `xerces-c_2_5_0.dll`, which is required by the tested `g3dcvtr.exe` build; it may coexist with `xerces-c_2_8.dll`.
 
 This release expands Pokemon DS Map Studio with new map-selection tools, Smart Drawing workflows, tile organization, portable metadata, and collision-default editing.
 

@@ -79,6 +79,8 @@ public class MapEditorHandler {
 
     //Layers
     public boolean[] renderLayers = new boolean[MapGrid.numLayers];
+    private final LayerDisplaySettings layerDisplaySettings =
+            new LayerDisplaySettings(MapGrid.numLayers);
 
     //Border Maps
     private Tileset borderMapTileset;
@@ -315,9 +317,9 @@ public class MapEditorHandler {
         MapGrid grid = getCurrentMap().getGrid();
         if (index >= 0 && index < MapGrid.numLayers) {
             for (int i = 0; i < MapGrid.numLayers; i++) {
-                renderLayers[i] = false;
+                setLayerState(i, false);
             }
-            renderLayers[index] = true;
+            setLayerState(index, true);
             activeLayer = index;
             mainFrame.repaintMapDisplay();
         }
@@ -327,7 +329,7 @@ public class MapEditorHandler {
         MapGrid grid = getCurrentMap().getGrid();
         if (index >= 0 && index < MapGrid.numLayers) {
             for (int i = 0; i < MapGrid.numLayers; i++) {
-                renderLayers[i] = !renderLayers[i];
+                setLayerState(i, !renderLayers[i]);
             }
             activeLayer = index;
             mainFrame.repaintMapDisplay();
@@ -347,7 +349,7 @@ public class MapEditorHandler {
     public void setAllLayersState(boolean enabled) {
         MapGrid grid = getCurrentMap().getGrid();
         for(int i = 0; i < MapGrid.numLayers; i++){
-            renderLayers[i] = enabled;
+            setLayerState(i, enabled);
         }
     }
 
@@ -376,12 +378,28 @@ public class MapEditorHandler {
     }
 
     public void invertLayerState(int index) {
-        renderLayers[index] = !renderLayers[index];
+        setLayerState(index, !renderLayers[index]);
         //mainFrame.repaintMapDisplay();
     }
 
     public void setLayerState(int index, boolean status) {
         renderLayers[index] = status;
+        layerDisplaySettings.setOpacityPercent(index,
+                status ? LayerDisplaySettings.MAX_OPACITY : LayerDisplaySettings.MIN_OPACITY);
+    }
+
+    public int getLayerOpacityPercent(int index) {
+        return layerDisplaySettings.getOpacityPercent(index);
+    }
+
+    public float getLayerOpacity(int index) {
+        return layerDisplaySettings.getOpacity(index);
+    }
+
+    public void setLayerOpacityPercent(int index, int opacityPercent) {
+        layerDisplaySettings.setOpacityPercent(index, opacityPercent);
+        renderLayers[index] = layerDisplaySettings.getOpacityPercent(index)
+                > LayerDisplaySettings.MIN_OPACITY;
     }
 
     public void updateLayerThumbnail(int index) {
