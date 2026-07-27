@@ -1441,6 +1441,15 @@ public class MainFrame extends JFrame {
         mapProjectActions.saveMapWithDialog();
     }
 
+    /** Saves from auxiliary editing workspaces using the same path logic as the main toolbar. */
+    public void saveMapProjectFromGlobalEditor() {
+        if (handler.getMapMatrix().filePath.isEmpty()) {
+            saveMapWithDialog();
+        } else {
+            saveMap();
+        }
+    }
+
     private void saveTilesetWithDialog() {
         mapProjectActions.saveTilesetWithDialog();
     }
