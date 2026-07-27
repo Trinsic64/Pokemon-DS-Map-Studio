@@ -103,6 +103,16 @@ import utils.Utils;
  */
 public class MapDisplay extends GLJPanel implements GLEventListener, MouseListener, MouseMotionListener, KeyListener, MouseWheelListener {
 
+    private enum MapRenderPass {
+        OPAQUE,
+        TRANSPARENT,
+        OTHER
+    }
+
+    private MapRenderPass mapRenderPass = MapRenderPass.OTHER;
+    private final float[] layerTextureEnvironmentColor =
+            new float[]{1.0f, 1.0f, 1.0f, 1.0f};
+
     //Editor Handler
     private boolean mouseWheelEnabled = true;
     protected MapEditorHandler handler;
@@ -817,9 +827,14 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         gl.glAlphaFunc(GL_GREATER, 0.9f);
 
         //long before = System.nanoTime();
-        drawAllMaps(gl, maps, (gl2, geometryGL, textures) -> {
-            drawGeometryGL(gl2, geometryGL, textures);
-        });
+        mapRenderPass = MapRenderPass.OPAQUE;
+        try {
+            drawAllMaps(gl, maps, (gl2, geometryGL, textures) -> {
+                drawGeometryGL(gl2, geometryGL, textures);
+            });
+        } finally {
+            mapRenderPass = MapRenderPass.OTHER;
+        }
         //System.out.println("Elapsed: " + (System.nanoTime() - before));
     }
 
@@ -835,9 +850,14 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         gl.glEnable(GL_ALPHA_TEST);
         gl.glAlphaFunc(GL_NOTEQUAL, 0.0f);
 
-        drawAllMaps(gl, maps, (gl2, geometryGL, textures) -> {
-            drawGeometryGL(gl2, geometryGL, textures);
-        });
+        mapRenderPass = MapRenderPass.TRANSPARENT;
+        try {
+            drawAllMaps(gl, maps, (gl2, geometryGL, textures) -> {
+                drawGeometryGL(gl2, geometryGL, textures);
+            });
+        } finally {
+            mapRenderPass = MapRenderPass.OTHER;
+        }
     }
 
     protected void drawWireframeMaps(GL2 gl, HashMap<Point, MapData> maps) {
@@ -935,11 +955,41 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
     protected void drawAllMapLayersGL(GL2 gl, DrawGeometryGLFunction drawFunction, MapLayerGL[] mapLayersGL, float x, float y, float z) {
         for (int i = 0; i < mapLayersGL.length; i++) {
-            if (handler.renderLayers[i]) {
+            float opacity = handler.getLayerOpacity(i);
+            if (handler.renderLayers[i] && opacity > 0.0f) {
                 if (mapLayersGL[i] != null) {
+                    configureLayerOpacity(gl, opacity);
                     drawMapLayerGL(gl, drawFunction, mapLayersGL[i], x, y, z);
+                    configureLayerOpacity(gl, 1.0f);
                 }
             }
+        }
+    }
+
+    /**
+     * Multiplies texture alpha at render time. Vertex RGB lighting remains
+     * unchanged, and no map, tile, material, or texture data is modified.
+     */
+    private void configureLayerOpacity(GL2 gl, float opacity) {
+        float clampedOpacity = Math.max(0.0f, Math.min(1.0f, opacity));
+
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_COMBINE);
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_COMBINE_RGB, GL2.GL_MODULATE);
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_SOURCE0_RGB, GL2.GL_TEXTURE);
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_SOURCE1_RGB, GL2.GL_PRIMARY_COLOR);
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_COMBINE_ALPHA, GL2.GL_MODULATE);
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_SOURCE0_ALPHA, GL2.GL_TEXTURE);
+        gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_SOURCE1_ALPHA, GL2.GL_CONSTANT);
+        layerTextureEnvironmentColor[3] = clampedOpacity;
+        gl.glTexEnvfv(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_COLOR,
+                layerTextureEnvironmentColor, 0);
+
+        if (clampedOpacity < 1.0f) {
+            gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else if (mapRenderPass == MapRenderPass.OPAQUE) {
+            gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA);
+        } else if (mapRenderPass == MapRenderPass.TRANSPARENT) {
+            gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         }
     }
 
@@ -2838,7 +2888,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         if (!handler.renderLayers[index]) {
             handler.setActiveTileLayer(index);
         }
-        handler.renderLayers[index] = !handler.renderLayers[index];
+        handler.invertLayerState(index);
         handler.getMainFrame().repaintThumbnailLayerSelector();
     }
 
@@ -3064,7 +3114,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
     protected void changeLayerWithNumKey(KeyEvent e, int layerIndex) {
         if ((e.getModifiers() & KeyEvent.SHIFT_MASK) != 0) {
-            handler.renderLayers[layerIndex] = !handler.renderLayers[layerIndex];
+            handler.invertLayerState(layerIndex);
         } else {
             handler.setActiveTileLayer(layerIndex);
         }

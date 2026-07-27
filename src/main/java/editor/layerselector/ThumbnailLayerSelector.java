@@ -5,14 +5,17 @@ import javax.swing.*;
 import javax.swing.GroupLayout;
 
 import editor.handler.MapEditorHandler;
+import editor.handler.LayerDisplaySettings;
 import editor.grid.MapGrid;
 import editor.state.MapLayerState;
 
 import java.awt.BasicStroke;
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
@@ -20,6 +23,8 @@ import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.JSeparator;
 import javax.swing.SwingUtilities;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
 
 /**
  * @author Trifindo, JackHack96
@@ -168,8 +173,13 @@ public class ThumbnailLayerSelector extends JPanel {
                     itemPasteTiles.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/pasteTileIcon.png")));
                     itemPasteHeights.setIcon(new javax.swing.ImageIcon(getClass().getResource("/icons/pasteHeightIcon.png")));
 
+                    itemShowLayer.setEnabled(!handler.renderLayers[index]
+                            || handler.getLayerOpacityPercent(index) < 100);
+                    itemHideLayer.setEnabled(handler.renderLayers[index]);
+
                     menu.add(itemShowLayer);
                     menu.add(itemHideLayer);
+                    menu.add(createOpacityControl(index));
                     menu.add(separator1);
                     menu.add(itemClearLayer);
                     menu.add(separator2);
@@ -195,6 +205,62 @@ public class ThumbnailLayerSelector extends JPanel {
         }
     }
 
+    private JMenu createOpacityControl(int layerIndex) {
+        int currentOpacity = handler.getLayerOpacityPercent(layerIndex);
+        JMenu opacityMenu = new AlignedSubmenu(formatOpacityLabel(currentOpacity));
+
+        JPanel sliderPanel = new JPanel(new BorderLayout(8, 0));
+        sliderPanel.setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
+
+        JSlider slider = new JSlider(
+                LayerDisplaySettings.MIN_OPACITY,
+                LayerDisplaySettings.MAX_OPACITY,
+                currentOpacity);
+        slider.setPreferredSize(new Dimension(150, 22));
+        slider.setToolTipText("Editor display only; map tiles are not changed");
+
+        JLabel percentageLabel = new JLabel(currentOpacity + "%", SwingConstants.RIGHT);
+        percentageLabel.setPreferredSize(new Dimension(36, 22));
+
+        ChangeListener updateOpacity = new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+                int opacity = slider.getValue();
+                opacityMenu.setText(formatOpacityLabel(opacity));
+                percentageLabel.setText(opacity + "%");
+                handler.setLayerOpacityPercent(layerIndex, opacity);
+                repaint();
+                handler.getMainFrame().repaintMapDisplay();
+            }
+        };
+        slider.addChangeListener(updateOpacity);
+
+        sliderPanel.add(slider, BorderLayout.CENTER);
+        sliderPanel.add(percentageLabel, BorderLayout.EAST);
+        opacityMenu.add(sliderPanel);
+        return opacityMenu;
+    }
+
+    private String formatOpacityLabel(int opacity) {
+        return "Layer Opacity: " + opacity + "%";
+    }
+
+    private static final class AlignedSubmenu extends JMenu {
+
+        private static final int HORIZONTAL_GAP = 4;
+
+        private AlignedSubmenu(String text) {
+            super(text);
+        }
+
+        @Override
+        protected Point getPopupMenuOrigin() {
+            // Keep the submenu clear of the selected parent row and align both
+            // rows vertically instead of using the overlapping Look & Feel offset.
+            return new Point(getWidth() + HORIZONTAL_GAP, 0);
+        }
+    }
+
     @Override
     public void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -205,11 +271,8 @@ public class ThumbnailLayerSelector extends JPanel {
                     g.drawImage(layerThumbnails[i], 0, i * layerHeight, null);
                 }
 
-                if (!handler.renderLayers[i]) {
-                    g.setColor(new Color(0, 0, 0, 100));
-                } else {
-                    g.setColor(new Color(100, 100, 100, 0));
-                }
+                int opacityShade = 100 - handler.getLayerOpacityPercent(i);
+                g.setColor(new Color(0, 0, 0, opacityShade));
                 if (handler.getActiveLayerIndex() == i) {
                     //g.setColor(new Color(255, 100, 100, 100));
                 }
