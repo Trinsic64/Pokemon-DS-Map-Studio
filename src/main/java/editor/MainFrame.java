@@ -342,9 +342,11 @@ public class MainFrame extends JFrame {
                 "Visually edit tiles, layers, heights, and selected matrix chunks");
         jmiGlobalEdit.addActionListener(e -> openGlobalMapEditor());
         int settingsIndex = jmEdit.getPopupMenu().getComponentIndex(menuItem1);
-        jmEdit.insertSeparator(settingsIndex);
-        jmEdit.insert(jmiGlobalEdit, settingsIndex + 1);
-        jmEdit.insert(jmiReplaceRemap, settingsIndex + 2);
+        //The generated menu already has a separator immediately before
+        //Settings. Insert the global tools into that existing section instead
+        //of creating a second empty divider.
+        jmEdit.insert(jmiGlobalEdit, settingsIndex);
+        jmEdit.insert(jmiReplaceRemap, settingsIndex + 1);
 
         //Status bar: rename the selected map readout and add the cursor tile
         //coordinates next to it
