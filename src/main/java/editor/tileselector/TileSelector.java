@@ -618,7 +618,8 @@ public class TileSelector extends JPanel {
         this.multiSelectionEnabled = false;
         this.readOnlySelectionMode = true;
         this.readOnlyVisibleIndices = null;
-        this.readOnlySelectedIndex = clampTileIndex(selectedIndex);
+        this.readOnlySelectedIndex =
+                selectedIndex < 0 ? -1 : clampTileIndex(selectedIndex);
         this.readOnlySelectionListener = selectionListener == null
                 ? index -> { } : selectionListener;
         this.readOnlyLayoutListener = layoutListener == null ? () -> { } : layoutListener;
@@ -650,7 +651,7 @@ public class TileSelector extends JPanel {
         if (!readOnlySelectionMode) {
             return;
         }
-        readOnlySelectedIndex = clampTileIndex(index);
+        readOnlySelectedIndex = index < 0 ? -1 : clampTileIndex(index);
         repaint();
     }
 

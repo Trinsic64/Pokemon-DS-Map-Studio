@@ -11,6 +11,7 @@ import tileset.Tile;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.table.AbstractTableModel;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
@@ -38,6 +39,8 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private static final Color PREVIEW_BACKGROUND = new Color(0, 127, 127);
     private static final int VIEW_PADDING = 6;
+    static final int EMPTY_TILE = -1;
+    static final int NO_TILE_SELECTED = -2;
 
     static boolean picksSourceTile(boolean previewMap, boolean shiftDown) {
         return previewMap == shiftDown;
@@ -64,6 +67,8 @@ public final class GlobalMapEditDialog extends JDialog {
     private final MainFrame owner;
     private final MapEditorHandler handler;
     private final MatrixSelectionPanel matrixSelection;
+    private final ChunkScopeTableModel chunkScopeModel;
+    private final JTable chunkScopeTable;
     private final JCheckBox[] layerChecks = new JCheckBox[MapGrid.numLayers];
     private final LayerScopePreview[] layerPreviews = new LayerScopePreview[MapGrid.numLayers];
     private final boolean[] previewLayerVisible = new boolean[MapGrid.numLayers];
@@ -120,6 +125,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private Point previewMap;
     private Point previewOnlyMap;
     private boolean updatingPreviewMapChoice;
+    private boolean updatingChunkScopeTable;
 
     public GlobalMapEditDialog(MainFrame owner, MapEditorHandler handler) {
         super(owner, "Global Map Editor", ModalityType.MODELESS);
@@ -130,15 +136,16 @@ public final class GlobalMapEditDialog extends JDialog {
         this.matrixSelection =
                 new MatrixSelectionPanel(handler, this::matrixSelectionChanged,
                         this::previewMatrixChunk);
+        this.chunkScopeModel = new ChunkScopeTableModel();
+        this.chunkScopeTable = new JTable(chunkScopeModel);
         this.beforePreview = new MapPreviewCanvas(false);
         this.afterPreview = new MapPreviewCanvas(true);
 
-        int selectedTile = clampTileIndex(handler.getTileIndexSelected());
-        sourceTileIndex = selectedTile;
-        replacementTileIndex = clampTileIndex(selectedTile + 1);
-        sourceBrowser.initReadOnly(handler, sourceTileIndex,
+        sourceTileIndex = NO_TILE_SELECTED;
+        replacementTileIndex = NO_TILE_SELECTED;
+        sourceBrowser.initReadOnly(handler, -1,
                 this::setSourceTileIndex, this::refreshTileBrowserLayouts);
-        replacementBrowser.initReadOnly(handler, replacementTileIndex,
+        replacementBrowser.initReadOnly(handler, -1,
                 this::setReplacementTileIndex, this::refreshTileBrowserLayouts);
 
         setDefaultCloseOperation(DISPOSE_ON_CLOSE);
@@ -154,7 +161,9 @@ public final class GlobalMapEditDialog extends JDialog {
         copyTargetLayer.setSelectedIndex((handler.getActiveLayerIndex() + 1) % MapGrid.numLayers);
         installReactiveControls();
         updateTileSummaries();
+        updateTileModeAvailability();
         refreshMapChoices(null);
+        refreshChunkScopeTable();
         refreshPreview();
         installKeyboardActions();
         installWorkspaceRefresh();
@@ -266,23 +275,69 @@ public final class GlobalMapEditDialog extends JDialog {
 
         JPanel controls = new JPanel();
         controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
-        JButton useSelected = new JButton("Main");
+        JButton useEmpty = new JButton("Set Empty");
+        useEmpty.setFocusable(false);
+        useEmpty.setMargin(new Insets(2, 5, 2, 5));
+        useEmpty.setAlignmentX(Component.CENTER_ALIGNMENT);
+        useEmpty.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                useEmpty.getPreferredSize().height));
+        useEmpty.setToolTipText(source
+                ? "Find cells that contain no tile"
+                : "Replace tile A with an empty cell, which deletes the matched tile");
+        useEmpty.addActionListener(e -> {
+            if (source) {
+                setSourceTileIndex(EMPTY_TILE);
+                status.setText("Find tile A set to Empty Tile.");
+            } else {
+                setReplacementTileIndex(EMPTY_TILE);
+                status.setText("Replacement tile B set to Empty Tile (delete A).");
+            }
+        });
+        controls.add(useEmpty);
+        controls.add(Box.createVerticalStrut(3));
+
+        JButton useSelected = new JButton("Use Main");
         useSelected.setFocusable(false);
         useSelected.setMargin(new Insets(2, 5, 2, 5));
         useSelected.setAlignmentX(Component.CENTER_ALIGNMENT);
         useSelected.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 useSelected.getPreferredSize().height));
-        useSelected.setToolTipText("Use the tile currently selected in the main editor");
+        useSelected.setToolTipText(
+                "Use the tile currently selected in the main PDSMS tile list");
         useSelected.addActionListener(e -> {
+            int mainTile = handler.getTileIndexSelected();
+            if (mainTile < 0 || mainTile >= handler.getTileset().size()) {
+                showValidation("Select a tile in the main PDSMS tile list first.");
+                return;
+            }
             if (source) {
-                setSourceTileIndex(handler.getTileIndexSelected());
-                sourceBrowser.setReadOnlySelectedIndex(sourceTileIndex);
+                setSourceTileIndex(mainTile);
             } else {
-                setReplacementTileIndex(handler.getTileIndexSelected());
-                replacementBrowser.setReadOnlySelectedIndex(replacementTileIndex);
+                setReplacementTileIndex(mainTile);
             }
         });
         controls.add(useSelected);
+        controls.add(Box.createVerticalStrut(3));
+
+        JButton unselect = new JButton("Unselect");
+        unselect.setFocusable(false);
+        unselect.setMargin(new Insets(2, 5, 2, 5));
+        unselect.setAlignmentX(Component.CENTER_ALIGNMENT);
+        unselect.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                unselect.getPreferredSize().height));
+        unselect.setToolTipText(source
+                ? "Clear tile A without choosing Empty Tile"
+                : "Clear tile B without choosing Empty Tile");
+        unselect.addActionListener(e -> {
+            if (source) {
+                setSourceTileIndex(NO_TILE_SELECTED);
+            } else {
+                setReplacementTileIndex(NO_TILE_SELECTED);
+            }
+            status.setText((source ? "Find tile A" : "Replacement tile B")
+                    + " unselected.");
+        });
+        controls.add(unselect);
 
         if (source) {
             controls.add(Box.createVerticalStrut(3));
@@ -301,7 +356,7 @@ public final class GlobalMapEditDialog extends JDialog {
             filterSourceToSelection.setAlignmentX(Component.CENTER_ALIGNMENT);
             filterSourceToSelection.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                     filterSourceToSelection.getPreferredSize().height));
-            filterSourceToSelection.setText("Chunks");
+            filterSourceToSelection.setText("Filter Chunk Tiles");
             filterSourceToSelection.setToolTipText(
                     "Hide Find tiles not used by the chosen chunks and checked layers");
             filterSourceToSelection.addActionListener(e -> refreshSourceFilter());
@@ -429,7 +484,7 @@ public final class GlobalMapEditDialog extends JDialog {
         gbc.gridx = 0;
         gbc.weightx = 0;
         gbc.insets = new Insets(0, 0, 0, 8);
-        panel.add(createHeaderTilePanel("Tile Selected",
+        panel.add(createHeaderTilePanel("Find Tile (A)",
                 sourceHeaderSummary, sourceHeaderIcon), gbc);
 
         JPanel mapPanel = new JPanel(new BorderLayout(4, 2));
@@ -474,7 +529,7 @@ public final class GlobalMapEditDialog extends JDialog {
         gbc.gridx = 2;
         gbc.weightx = 0;
         gbc.insets = new Insets(0, 0, 0, 0);
-        panel.add(createHeaderTilePanel("New Tile",
+        panel.add(createHeaderTilePanel("Replacement Tile (B)",
                 replacementHeaderSummary, replacementHeaderIcon), gbc);
         return panel;
     }
@@ -608,7 +663,89 @@ public final class GlobalMapEditDialog extends JDialog {
         scopeCards.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
         controls.add(scopeCards);
         panel.add(controls, BorderLayout.NORTH);
+        panel.add(createSelectedChunksPanel(), BorderLayout.CENTER);
         return panel;
+    }
+
+    private JPanel createSelectedChunksPanel() {
+        JPanel panel = new JPanel(new BorderLayout(4, 4));
+        panel.setBorder(BorderFactory.createTitledBorder("Selected chunks"));
+
+        chunkScopeTable.setSelectionMode(
+                ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
+        chunkScopeTable.setFillsViewportHeight(true);
+        chunkScopeTable.setRowSelectionAllowed(true);
+        chunkScopeTable.setColumnSelectionAllowed(false);
+        chunkScopeTable.setToolTipText(
+                "Click a row to show that chunk; select rows and use Remove to unselect them");
+        chunkScopeTable.getColumnModel().getColumn(0).setPreferredWidth(78);
+        chunkScopeTable.getColumnModel().getColumn(0).setMaxWidth(92);
+        chunkScopeTable.getSelectionModel().addListSelectionListener(event -> {
+            if (event.getValueIsAdjusting() || updatingChunkScopeTable) {
+                return;
+            }
+            int viewRow = chunkScopeTable.getSelectionModel()
+                    .getLeadSelectionIndex();
+            if (viewRow < 0) {
+                return;
+            }
+            int modelRow = chunkScopeTable.convertRowIndexToModel(viewRow);
+            Point point = chunkScopeModel.getPoint(modelRow);
+            if (point != null) {
+                previewMatrixChunk(point);
+                status.setText("Showing selected chunk "
+                        + handler.getMapMatrix().getMapName(point)
+                        + " (" + point.x + ", " + point.y + ").");
+            }
+        });
+        chunkScopeTable.getInputMap(JComponent.WHEN_FOCUSED).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0),
+                "removeSelectedChunks");
+        chunkScopeTable.getActionMap().put("removeSelectedChunks",
+                new AbstractAction() {
+                    @Override
+                    public void actionPerformed(java.awt.event.ActionEvent event) {
+                        removeSelectedChunkRows();
+                    }
+                });
+
+        JScrollPane scroll = new JScrollPane(chunkScopeTable);
+        scroll.setPreferredSize(new Dimension(360, 100));
+        scroll.setMinimumSize(new Dimension(280, 70));
+        panel.add(scroll, BorderLayout.CENTER);
+
+        JPanel footer = new JPanel(new BorderLayout(5, 0));
+        JLabel layerScope = new JLabel(
+                "Checked layers on the left apply to every listed chunk.");
+        layerScope.setForeground(UIManager.getColor("Label.disabledForeground"));
+        layerScope.setToolTipText(
+                "Layer scope remains global so Apply All behaves consistently");
+        footer.add(layerScope, BorderLayout.CENTER);
+        JButton remove = compactButton("Remove",
+                "Unselect the highlighted chunks from the matrix scope");
+        remove.addActionListener(e -> removeSelectedChunkRows());
+        footer.add(remove, BorderLayout.EAST);
+        panel.add(footer, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private void removeSelectedChunkRows() {
+        int[] rows = chunkScopeTable.getSelectedRows();
+        if (rows.length == 0) {
+            showValidation("Select one or more chunk rows to remove.");
+            return;
+        }
+        Set<Point> selected = matrixSelection.getSelectedMaps();
+        for (int viewRow : rows) {
+            Point point = chunkScopeModel.getPoint(
+                    chunkScopeTable.convertRowIndexToModel(viewRow));
+            if (point != null) {
+                selected.remove(point);
+            }
+        }
+        matrixSelection.setSelectedMaps(selected);
+        status.setText("Removed " + rows.length
+                + " chunk(s) from the selected scope.");
     }
 
     private JPanel createOperationPanel() {
@@ -911,8 +1048,16 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private void tileModeChanged() {
         boolean deleting = deleteMode.isSelected();
-        replacementBrowser.setEnabled(!deleting);
-        replacementSummary.setEnabled(!deleting);
+        if (deleting) {
+            replacementTileIndex = EMPTY_TILE;
+        } else if (replacementTileIndex == EMPTY_TILE) {
+            replacementTileIndex = NO_TILE_SELECTED;
+        }
+        replacementBrowser.setReadOnlySelectedIndex(
+                browserSelectionIndex(replacementTileIndex));
+        replacementBrowser.setEnabled(true);
+        replacementSummary.setEnabled(true);
+        updateTileModeAvailability();
         refreshCollisionDefaults.setEnabled(!deleting);
         if (deleting) {
             keepCollisions.setSelected(true);
@@ -925,7 +1070,10 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private void updateTileModeExplanation() {
-        String explanation = deleteMode.isSelected()
+        String explanation = !isTileChoiceConfigured(sourceTileIndex)
+                || !isTileChoiceConfigured(replacementTileIndex)
+                ? "Choose A and B. Empty A finds blank cells; Empty B deletes A."
+                : deleteMode.isSelected()
                 ? "Removes A only. Empty cells retain their existing height values."
                 : swapTiles.isSelected()
                 ? "Two-way exchange: A becomes B and B becomes A."
@@ -943,10 +1091,13 @@ public final class GlobalMapEditDialog extends JDialog {
         addWindowFocusListener(new WindowAdapter() {
             @Override
             public void windowGainedFocus(WindowEvent event) {
-                sourceTileIndex = clampTileIndex(sourceTileIndex);
-                replacementTileIndex = clampTileIndex(replacementTileIndex);
-                sourceBrowser.setReadOnlySelectedIndex(sourceTileIndex);
-                replacementBrowser.setReadOnlySelectedIndex(replacementTileIndex);
+                sourceTileIndex = normalizeTileChoice(sourceTileIndex);
+                replacementTileIndex = normalizeTileChoice(replacementTileIndex);
+                sourceBrowser.setReadOnlySelectedIndex(
+                        browserSelectionIndex(sourceTileIndex));
+                replacementBrowser.setReadOnlySelectedIndex(
+                        browserSelectionIndex(replacementTileIndex));
+                updateTileModeAvailability();
                 sourceBrowser.updateLayout();
                 replacementBrowser.updateLayout();
                 updateTileSummaries();
@@ -986,7 +1137,11 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private void selectChunksContainingSource(boolean scanAllLayers) {
-        if (handler.getTileset().size() == 0) {
+        if (!isTileChoiceConfigured(sourceTileIndex)) {
+            showValidation("Choose tile A or set it to Empty before searching.");
+            return;
+        }
+        if (sourceTileIndex >= 0 && handler.getTileset().size() == 0) {
             showValidation("Load a tileset before searching for tile usage.");
             return;
         }
@@ -1050,17 +1205,35 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private void setSourceTileIndex(int index) {
-        sourceTileIndex = clampTileIndex(index);
+        sourceTileIndex = normalizeTileChoice(index);
+        sourceBrowser.setReadOnlySelectedIndex(
+                browserSelectionIndex(sourceTileIndex));
+        updateTileModeAvailability();
         excludedMatches.clear();
         updateTileSummaries();
+        updateTileModeExplanation();
+        updateOperationHint();
         refreshSourceFilter();
         refreshPreview();
     }
 
     private void setReplacementTileIndex(int index) {
-        replacementTileIndex = clampTileIndex(index);
+        replacementTileIndex = normalizeTileChoice(index);
+        if (replacementTileIndex == EMPTY_TILE) {
+            deleteMode.setSelected(true);
+            keepCollisions.setSelected(true);
+        } else if (deleteMode.isSelected()) {
+            replaceMode.setSelected(true);
+        }
+        replacementBrowser.setReadOnlySelectedIndex(
+                browserSelectionIndex(replacementTileIndex));
+        updateTileModeAvailability();
+        refreshCollisionDefaults.setEnabled(
+                replacementTileIndex != EMPTY_TILE);
         excludedMatches.clear();
         updateTileSummaries();
+        updateTileModeExplanation();
+        updateOperationHint();
         refreshPreview();
     }
 
@@ -1068,32 +1241,42 @@ public final class GlobalMapEditDialog extends JDialog {
         return Math.max(0, Math.min(index, Math.max(0, handler.getTileset().size() - 1)));
     }
 
+    private int normalizeTileChoice(int index) {
+        return index == EMPTY_TILE || index == NO_TILE_SELECTED
+                ? index : clampTileIndex(index);
+    }
+
+    private static int browserSelectionIndex(int tileChoice) {
+        return tileChoice >= 0 ? tileChoice : -1;
+    }
+
+    private static boolean isTileChoiceConfigured(int tileChoice) {
+        return tileChoice != NO_TILE_SELECTED;
+    }
+
+    private void updateTileModeAvailability() {
+        boolean canSwap = sourceTileIndex >= 0 && replacementTileIndex >= 0;
+        swapTiles.setEnabled(canSwap);
+        if (!canSwap && swapTiles.isSelected()) {
+            replaceMode.setSelected(true);
+        }
+    }
+
     private void updateTileSummaries() {
         sourceSummary.setText(tileSummary(sourceTileIndex));
-        replacementSummary.setText(deleteMode.isSelected()
-                ? "<html><center><b>Not used</b><br>Delete removes tile A</center></html>"
-                : tileSummary(replacementTileIndex));
-        replaceSummary.setText(deleteMode.isSelected()
-                ? "<html><b>A: " + tileShortName(sourceTileIndex)
-                + "</b> &nbsp;\u2192&nbsp; <b>Empty</b></html>"
-                : "<html><b>A: " + tileShortName(sourceTileIndex)
+        replacementSummary.setText(tileSummary(replacementTileIndex));
+        replaceSummary.setText("<html><b>A: " + tileShortName(sourceTileIndex)
                 + "</b> &nbsp;\u2192&nbsp; <b>B: " + tileShortName(replacementTileIndex)
                 + "</b></html>");
         sourceHeaderSummary.setText("<html><b>A: "
                 + tileShortName(sourceTileIndex) + "</b></html>");
         sourceHeaderIcon.setIcon(tileHeaderIcon(sourceTileIndex));
         sourceHeaderIcon.setToolTipText(tilePickerDescription(sourceTileIndex));
-        if (deleteMode.isSelected()) {
-            replacementHeaderSummary.setText("<html><b>B: Empty</b></html>");
-            replacementHeaderIcon.setIcon(null);
-            replacementHeaderIcon.setToolTipText("Delete removes tile A without a replacement");
-        } else {
-            replacementHeaderSummary.setText("<html><b>B: "
-                    + tileShortName(replacementTileIndex) + "</b></html>");
-            replacementHeaderIcon.setIcon(tileHeaderIcon(replacementTileIndex));
-            replacementHeaderIcon.setToolTipText(
-                    tilePickerDescription(replacementTileIndex));
-        }
+        replacementHeaderSummary.setText("<html><b>B: "
+                + tileShortName(replacementTileIndex) + "</b></html>");
+        replacementHeaderIcon.setIcon(tileHeaderIcon(replacementTileIndex));
+        replacementHeaderIcon.setToolTipText(
+                tilePickerDescription(replacementTileIndex));
     }
 
     private ImageIcon tileHeaderIcon(int index) {
@@ -1125,6 +1308,14 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private String tileSummary(int index) {
+        if (index == NO_TILE_SELECTED) {
+            return "<html><center><b>No Tile Selected</b><br>"
+                    + "Choose a tile or Set Empty</center></html>";
+        }
+        if (index == EMPTY_TILE) {
+            return "<html><center><b>Empty Tile</b><br>"
+                    + "No tile occupies the cell</center></html>";
+        }
         if (handler.getTileset().size() == 0 || index >= handler.getTileset().size()) {
             return "No tile loaded";
         }
@@ -1136,6 +1327,12 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private String tileShortName(int index) {
+        if (index == NO_TILE_SELECTED) {
+            return "No Tile Selected";
+        }
+        if (index == EMPTY_TILE) {
+            return "Empty Tile";
+        }
         if (handler.getTileset().size() == 0 || index >= handler.getTileset().size()) {
             return "No tile";
         }
@@ -1152,6 +1349,12 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private String tilePickerDescription(int index) {
+        if (index == NO_TILE_SELECTED) {
+            return "No Tile Selected";
+        }
+        if (index == EMPTY_TILE) {
+            return "Empty Tile";
+        }
         if (index < 0 || index >= handler.getTileset().size()) {
             return "Tile " + index;
         }
@@ -1210,8 +1413,10 @@ public final class GlobalMapEditDialog extends JDialog {
                 }
             }
         }
-        //Keep the current source visible so filtering never strands the user.
-        visible.add(sourceTileIndex);
+        //Keep a real selected source visible so filtering never strands it.
+        if (sourceTileIndex >= 0) {
+            visible.add(sourceTileIndex);
+        }
         sourceBrowser.setReadOnlyVisibleIndices(visible);
         sourceFilterStatus.setText(visible.size() + " / "
                 + handler.getTileset().size() + " tiles");
@@ -1219,6 +1424,7 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private void matrixSelectionChanged(Point lastTouched) {
         refreshMapChoices(lastTouched);
+        refreshChunkScopeTable();
         refreshSourceFilter();
         refreshLayerPreviews();
         refreshPreview();
@@ -1314,6 +1520,11 @@ public final class GlobalMapEditDialog extends JDialog {
         int chunks = matrixSelection.getSelectedMaps().size();
         switch (tab) {
             case 0:
+                if (!isTileChoiceConfigured(sourceTileIndex)
+                        || !isTileChoiceConfigured(replacementTileIndex)) {
+                    previewStats.setText("Choose A and B  \u00b7  Chunks " + chunks);
+                    break;
+                }
                 int[] counts = countReplaceMatches(matrixSelection.getSelectedMaps());
                 previewStats.setText("Matches " + counts[0] + "  \u00b7  Included "
                         + counts[1] + "  \u00b7  Excluded " + (counts[0] - counts[1])
@@ -1341,6 +1552,9 @@ public final class GlobalMapEditDialog extends JDialog {
     private int[] countReplaceMatches(Set<Point> maps) {
         int matches = 0;
         int included = 0;
+        if (!isTileChoiceConfigured(sourceTileIndex)) {
+            return new int[]{0, 0};
+        }
         int[] layers = selectedLayers();
         for (Point point : maps) {
             MapData data = handler.getMapMatrix().getMap(point);
@@ -1375,6 +1589,9 @@ public final class GlobalMapEditDialog extends JDialog {
     private ArrayList<GlobalMapOperations.TileCell> matchingCellsAt(
             Point point, int x, int y) {
         ArrayList<GlobalMapOperations.TileCell> matches = new ArrayList<>();
+        if (!isTileChoiceConfigured(sourceTileIndex)) {
+            return matches;
+        }
         MapData data = handler.getMapMatrix().getMap(point);
         if (data == null) {
             return matches;
@@ -1422,6 +1639,10 @@ public final class GlobalMapEditDialog extends JDialog {
         int tab = operations.getSelectedIndex();
         switch (tab) {
             case 0:
+                if (!isTileChoiceConfigured(sourceTileIndex)
+                        || !isTileChoiceConfigured(replacementTileIndex)) {
+                    return current;
+                }
                 if (!layerChecks[layer].isSelected() || isExcluded(map, layer, x, y)) {
                     return current;
                 }
@@ -1529,7 +1750,10 @@ public final class GlobalMapEditDialog extends JDialog {
     private void updateOperationHint() {
         switch (operations.getSelectedIndex()) {
             case 0:
-                operationHint.setText(deleteMode.isSelected() ? "Delete A"
+                operationHint.setText(!isTileChoiceConfigured(sourceTileIndex)
+                        || !isTileChoiceConfigured(replacementTileIndex)
+                        ? "Choose A and B"
+                        : deleteMode.isSelected() ? "Delete A"
                         : swapTiles.isSelected() ? "Swap A \u2194 B" : "Replace A \u2192 B");
                 operationHint.setToolTipText("Apply changes the shown selected chunk; "
                         + "Apply All changes every selected chunk. Heights stay unchanged.");
@@ -1562,6 +1786,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 title = "Tile Operation";
                 body = "<b>Useful for:</b> fixing a shared bad tile, changing a path or terrain "
                         + "variant, exchanging two variants, or deleting one tile from the scope."
+                        + "<br><br><b>Empty Tile:</b> use Empty as A to fill blank cells with B. "
+                        + "Use Empty as B to delete A."
                         + "<br><br><b>Scope:</b> chosen chunks, checked layers, and any individual "
                         + "matches left included in Map Preview."
                         + "<br><br><b>Safeguards:</b> heights never change. Existing collisions "
@@ -1642,6 +1868,25 @@ public final class GlobalMapEditDialog extends JDialog {
 
         switch (tab) {
             case 0:
+                if (!isTileChoiceConfigured(sourceTileIndex)) {
+                    showValidation("Choose find tile A or set A to Empty Tile.");
+                    return;
+                }
+                if (!isTileChoiceConfigured(replacementTileIndex)) {
+                    showValidation("Choose replacement tile B or set B to Empty Tile.");
+                    return;
+                }
+                if (sourceTileIndex == EMPTY_TILE
+                        && replacementTileIndex == EMPTY_TILE) {
+                    showValidation("Empty A and Empty B would not change the map.");
+                    return;
+                }
+                if (swapTiles.isSelected()
+                        && (sourceTileIndex == EMPTY_TILE
+                        || replacementTileIndex == EMPTY_TILE)) {
+                    showValidation("Use Replace when either A or B is Empty Tile.");
+                    return;
+                }
                 if (!deleteMode.isSelected()
                         && sourceTileIndex == replacementTileIndex) {
                     showValidation("Choose two different tiles.");
@@ -1756,8 +2001,29 @@ public final class GlobalMapEditDialog extends JDialog {
         matrixSelection.revalidate();
         matrixSelection.repaint();
         refreshMapChoices(null);
+        refreshChunkScopeTable();
         refreshSourceFilter();
         refreshPreview();
+    }
+
+    private void refreshChunkScopeTable() {
+        updatingChunkScopeTable = true;
+        try {
+            chunkScopeModel.setMaps(matrixSelection.getSelectedMaps());
+            chunkScopeTable.clearSelection();
+            if (previewMap != null) {
+                int row = chunkScopeModel.indexOf(previewMap);
+                if (row >= 0) {
+                    int viewRow = chunkScopeTable.convertRowIndexToView(row);
+                    chunkScopeTable.getSelectionModel()
+                            .setSelectionInterval(viewRow, viewRow);
+                    chunkScopeTable.scrollRectToVisible(
+                            chunkScopeTable.getCellRect(viewRow, 0, true));
+                }
+            }
+        } finally {
+            updatingChunkScopeTable = false;
+        }
     }
 
     private void refreshLayerPreviews() {
@@ -2153,6 +2419,7 @@ public final class GlobalMapEditDialog extends JDialog {
         private final boolean after;
         private Rectangle mapBounds = new Rectangle();
         private PreviewTile hoveredTile;
+        private Point hoveredEmptyCell;
 
         private MapPreviewCanvas(boolean after) {
             this.after = after;
@@ -2180,33 +2447,42 @@ public final class GlobalMapEditDialog extends JDialog {
                     if (!SwingUtilities.isLeftMouseButton(event)) {
                         return;
                     }
-                    int tileIndex = tileAt(event.getPoint());
-                    if (tileIndex < 0) {
-                        status.setText("No visible tile was found at that point.");
+                    Point cell = cellAt(event.getPoint());
+                    if (cell == null) {
+                        status.setText("Click inside the map preview.");
                         return;
                     }
+                    int tileIndex = tileAt(event.getPoint());
+                    int tileChoice = tileIndex < 0 ? EMPTY_TILE : tileIndex;
                     boolean pickSource =
                             picksSourceTile(after, event.isShiftDown());
                     if (pickSource) {
-                        setSourceTileIndex(tileIndex);
-                        sourceBrowser.setReadOnlySelectedIndex(tileIndex);
-                        scrollTileBrowserToSelection(sourceBrowser);
+                        setSourceTileIndex(tileChoice);
+                        if (tileChoice >= 0) {
+                            scrollTileBrowserToSelection(sourceBrowser);
+                        }
                         status.setText("Picked find tile A: "
-                                + tilePickerDescription(tileIndex));
+                                + tilePickerDescription(tileChoice));
                     } else {
-                        setReplacementTileIndex(tileIndex);
-                        replacementBrowser.setReadOnlySelectedIndex(tileIndex);
-                        scrollTileBrowserToSelection(replacementBrowser);
+                        setReplacementTileIndex(tileChoice);
+                        if (tileChoice >= 0) {
+                            scrollTileBrowserToSelection(replacementBrowser);
+                        }
                         status.setText("Picked replacement tile B: "
-                                + tilePickerDescription(tileIndex));
+                                + tilePickerDescription(tileChoice));
                     }
                 }
 
                 @Override
                 public void mouseMoved(MouseEvent event) {
                     PreviewTile next = tileOccurrenceAt(event.getPoint());
-                    if (!sameOccurrence(hoveredTile, next)) {
+                    Point nextEmptyCell = next == null
+                            ? cellAt(event.getPoint()) : null;
+                    if (!sameOccurrence(hoveredTile, next)
+                            || !java.util.Objects.equals(
+                            hoveredEmptyCell, nextEmptyCell)) {
                         hoveredTile = next;
+                        hoveredEmptyCell = nextEmptyCell;
                         repaint();
                     }
                 }
@@ -2340,12 +2616,16 @@ public final class GlobalMapEditDialog extends JDialog {
                             }
                             int tileIndex =
                                     data.getGrid().tileLayers[match.layer][match.x][match.y];
-                            if (tileIndex < 0
-                                    || tileIndex >= handler.getTileset().size()) {
+                            Rectangle bounds;
+                            if (tileIndex == EMPTY_TILE) {
+                                bounds = cellBounds(match.x, match.y);
+                            } else if (tileIndex >= 0
+                                    && tileIndex < handler.getTileset().size()) {
+                                bounds = tileBounds(match.x, match.y,
+                                        handler.getTileset().get(tileIndex));
+                            } else {
                                 continue;
                             }
-                            Rectangle bounds = tileBounds(match.x, match.y,
-                                    handler.getTileset().get(tileIndex));
                             (excluded ? excludedBounds : includedBounds).add(bounds);
                         }
                     }
@@ -2383,7 +2663,9 @@ public final class GlobalMapEditDialog extends JDialog {
             for (Rectangle rectangle : bounds) {
                 combined.add(new Area(rectangle));
             }
-            g2.setColor(new Color(105, 225, 240, 68));
+            g2.setColor(new Color(105, 225, 240, 18));
+            g2.fill(combined);
+            g2.setColor(new Color(105, 225, 240, 62));
             g2.setStroke(new BasicStroke(1f));
             g2.draw(combined);
         }
@@ -2413,11 +2695,15 @@ public final class GlobalMapEditDialog extends JDialog {
         }
 
         private void drawHoveredTile(Graphics2D g2) {
-            if (hoveredTile == null) {
+            Rectangle bounds;
+            if (hoveredTile != null) {
+                Tile tile = handler.getTileset().get(hoveredTile.tileIndex);
+                bounds = tileBounds(hoveredTile.x, hoveredTile.y, tile);
+            } else if (hoveredEmptyCell != null) {
+                bounds = cellBounds(hoveredEmptyCell.x, hoveredEmptyCell.y);
+            } else {
                 return;
             }
-            Tile tile = handler.getTileset().get(hoveredTile.tileIndex);
-            Rectangle bounds = tileBounds(hoveredTile.x, hoveredTile.y, tile);
             g2.setColor(new Color(255, 255, 255, 20));
             g2.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
             g2.setColor(new Color(255, 255, 255, 105));
@@ -2508,8 +2794,9 @@ public final class GlobalMapEditDialog extends JDialog {
         }
 
         private void clearHover() {
-            if (hoveredTile != null) {
+            if (hoveredTile != null || hoveredEmptyCell != null) {
                 hoveredTile = null;
+                hoveredEmptyCell = null;
                 repaint();
             }
         }
@@ -2525,13 +2812,13 @@ public final class GlobalMapEditDialog extends JDialog {
                     ? "click for B, Shift-click for A"
                     : "click for A, Shift-click for B";
             if (after) {
-                return (tileIndex < 0 ? "Empty pixel" : tilePickerDescription(tileIndex))
+                return (tileIndex < 0 ? "Empty Tile" : tilePickerDescription(tileIndex))
                         + " \u2014 " + picking;
             }
             ArrayList<GlobalMapOperations.TileCell> matches =
                     matchingCellsAt(previewMap, cell.x, cell.y);
             if (matches.isEmpty()) {
-                return (tileIndex < 0 ? "Empty pixel" : tilePickerDescription(tileIndex))
+                return (tileIndex < 0 ? "Empty Tile" : tilePickerDescription(tileIndex))
                         + " \u2014 " + picking;
             }
             StringBuilder layers = new StringBuilder();
@@ -2554,6 +2841,53 @@ public final class GlobalMapEditDialog extends JDialog {
             g2.setColor(foreground == null ? Color.LIGHT_GRAY : foreground);
             g2.drawString(message, Math.max(5, (getWidth() - metrics.stringWidth(message)) / 2),
                     Math.max(metrics.getAscent() + 5, getHeight() / 2));
+        }
+    }
+
+    private final class ChunkScopeTableModel extends AbstractTableModel {
+
+        private final ArrayList<Point> points = new ArrayList<>();
+
+        private void setMaps(Set<Point> maps) {
+            points.clear();
+            for (Point point : maps) {
+                points.add(new Point(point));
+            }
+            points.sort(Comparator.comparingInt((Point point) -> point.y)
+                    .thenComparingInt(point -> point.x));
+            fireTableDataChanged();
+        }
+
+        private Point getPoint(int row) {
+            return row < 0 || row >= points.size()
+                    ? null : new Point(points.get(row));
+        }
+
+        private int indexOf(Point point) {
+            return points.indexOf(point);
+        }
+
+        @Override
+        public int getRowCount() {
+            return points.size();
+        }
+
+        @Override
+        public int getColumnCount() {
+            return 2;
+        }
+
+        @Override
+        public String getColumnName(int column) {
+            return column == 0 ? "Chunk" : "Map";
+        }
+
+        @Override
+        public Object getValueAt(int row, int column) {
+            Point point = points.get(row);
+            return column == 0
+                    ? "(" + point.x + ", " + point.y + ")"
+                    : handler.getMapMatrix().getMapName(point);
         }
     }
 

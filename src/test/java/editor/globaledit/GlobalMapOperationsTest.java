@@ -75,6 +75,28 @@ class GlobalMapOperationsTest {
     }
 
     @Test
+    void emptyFindTileCanFillBlankCellsWithoutChangingHeights() {
+        MapGrid grid = new MapGrid(null);
+        for (int x = 0; x < MapGrid.cols; x++) {
+            for (int y = 0; y < MapGrid.rows; y++) {
+                grid.tileLayers[0][x][y] = 3;
+            }
+        }
+        grid.tileLayers[0][4][5] = -1;
+        grid.tileLayers[0][6][5] = -1;
+        grid.heightLayers[0][4][5] = 7;
+
+        int changed = GlobalMapOperations.replaceTiles(
+                grid, new int[]{0}, -1, 9, false);
+
+        assertEquals(2, changed);
+        assertEquals(9, grid.tileLayers[0][4][5]);
+        assertEquals(9, grid.tileLayers[0][6][5]);
+        assertEquals(3, grid.tileLayers[0][5][5]);
+        assertEquals(7, grid.heightLayers[0][4][5]);
+    }
+
+    @Test
     void copiesTileAndHeightLayoutsWithoutSharingArrays() {
         MapGrid grid = new MapGrid(null);
         grid.tileLayers[2][3][4] = 11;
