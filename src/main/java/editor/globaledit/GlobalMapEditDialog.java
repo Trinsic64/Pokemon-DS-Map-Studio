@@ -675,21 +675,22 @@ public final class GlobalMapEditDialog extends JDialog {
         chunkScopeTable.getTableHeader().setReorderingAllowed(false);
         chunkScopeTable.setToolTipText(
                 "Each row stores an independent L1-L9 edit scope for one selected chunk");
-        chunkScopeTable.getColumnModel().getColumn(0).setPreferredWidth(58);
-        chunkScopeTable.getColumnModel().getColumn(0).setMinWidth(52);
+        chunkScopeTable.getColumnModel().getColumn(0).setPreferredWidth(54);
+        chunkScopeTable.getColumnModel().getColumn(0).setMinWidth(48);
+        chunkScopeTable.getColumnModel().getColumn(0).setMaxWidth(62);
         for (int column = 1; column <= MapGrid.numLayers; column++) {
-            chunkScopeTable.getColumnModel().getColumn(column).setPreferredWidth(29);
-            chunkScopeTable.getColumnModel().getColumn(column).setMinWidth(27);
-            chunkScopeTable.getColumnModel().getColumn(column).setMaxWidth(34);
+            chunkScopeTable.getColumnModel().getColumn(column).setPreferredWidth(23);
+            chunkScopeTable.getColumnModel().getColumn(column).setMinWidth(22);
+            chunkScopeTable.getColumnModel().getColumn(column).setMaxWidth(27);
         }
         int applyColumn = MapGrid.numLayers + 1;
         int removeColumn = MapGrid.numLayers + 2;
-        chunkScopeTable.getColumnModel().getColumn(applyColumn).setPreferredWidth(52);
-        chunkScopeTable.getColumnModel().getColumn(applyColumn).setMinWidth(48);
-        chunkScopeTable.getColumnModel().getColumn(applyColumn).setMaxWidth(60);
-        chunkScopeTable.getColumnModel().getColumn(removeColumn).setPreferredWidth(32);
-        chunkScopeTable.getColumnModel().getColumn(removeColumn).setMinWidth(30);
-        chunkScopeTable.getColumnModel().getColumn(removeColumn).setMaxWidth(36);
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setPreferredWidth(48);
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setMinWidth(44);
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setMaxWidth(56);
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setPreferredWidth(40);
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setMinWidth(40);
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setMaxWidth(40);
         chunkScopeTable.getColumnModel().getColumn(applyColumn).setCellRenderer(
                 new ChunkActionButtonRenderer("Apply", null,
                         "Apply the current operation only to this chunk"));
@@ -3092,7 +3093,7 @@ public final class GlobalMapEditDialog extends JDialog {
         private ChunkActionButtonRenderer(String text, Icon icon, String tooltip) {
             super(text, icon);
             setFocusable(false);
-            setMargin(new Insets(1, 2, 1, 2));
+            setMargin(new Insets(1, 1, 1, 1));
             setToolTipText(tooltip);
         }
 
@@ -3117,7 +3118,7 @@ public final class GlobalMapEditDialog extends JDialog {
             this.action = action;
             button = new JButton(text, icon);
             button.setFocusable(false);
-            button.setMargin(new Insets(1, 2, 1, 2));
+            button.setMargin(new Insets(1, 1, 1, 1));
             button.setToolTipText(tooltip);
             button.addActionListener(event -> {
                 Point target = point == null ? null : new Point(point);
@@ -3147,15 +3148,19 @@ public final class GlobalMapEditDialog extends JDialog {
         public void paintIcon(Component component, Graphics graphics, int x, int y) {
             Graphics2D g2 = (Graphics2D) graphics.create();
             try {
-                Color foreground = UIManager.getColor("Button.foreground");
-                g2.setColor(foreground == null ? Color.LIGHT_GRAY : foreground);
-                g2.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND,
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(component.isEnabled()
+                        ? new Color(0xDF6A6A)
+                        : new Color(0x8E7777));
+                g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND,
                         BasicStroke.JOIN_ROUND));
-                g2.drawLine(x + 4, y + 4, x + 12, y + 4);
-                g2.drawLine(x + 6, y + 2, x + 10, y + 2);
-                g2.drawRoundRect(x + 5, y + 5, 6, 8, 1, 1);
-                g2.drawLine(x + 7, y + 7, x + 7, y + 11);
-                g2.drawLine(x + 9, y + 7, x + 9, y + 11);
+                g2.drawLine(x + 3, y + 5, x + 15, y + 5);
+                g2.drawLine(x + 6, y + 2, x + 12, y + 2);
+                g2.drawLine(x + 8, y + 1, x + 10, y + 1);
+                g2.drawRoundRect(x + 5, y + 6, 8, 10, 2, 2);
+                g2.drawLine(x + 8, y + 9, x + 8, y + 13);
+                g2.drawLine(x + 10, y + 9, x + 10, y + 13);
             } finally {
                 g2.dispose();
             }
@@ -3163,12 +3168,12 @@ public final class GlobalMapEditDialog extends JDialog {
 
         @Override
         public int getIconWidth() {
-            return 16;
+            return 18;
         }
 
         @Override
         public int getIconHeight() {
-            return 16;
+            return 18;
         }
     }
 
