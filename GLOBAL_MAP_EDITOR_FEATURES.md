@@ -118,16 +118,17 @@ unselected tile blocks Apply; Empty Tile is an explicit editable value.
 - Preview compositing follows the main map renderer's effective tile height,
   tile X/Y/Z offsets, and equal-depth layer precedence.
 
-## Apply, Undo, and Save
+## Apply, Undo, and Close
 
 - **Row Apply:** current operation, one chunk, that row's layers.
 - **Apply** (bottom bar): current operation, currently shown selected chunk, that
   chunk's layers.
 - **Apply All:** current operation, every selected chunk, each row's own layers.
 - **Undo:** undoes the most recent map edit, including a multi-chunk Apply All.
-- **Save:** saves the complete PDSMS map project.
 - **Close:** closes the Global Map Editor; already applied work remains
   undoable in the main editor.
+
+Map projects are saved through the normal PDSMS toolbar or File menu.
 
 ## Interim Operations
 
@@ -219,7 +220,7 @@ These decisions are deliberately recorded rather than silently assumed.
 
 ## Control Placement
 
-- Matrix selection, chunk rows, layer scopes, Apply, Undo, Save, and Close are
+- Matrix selection, chunk rows, layer scopes, Apply, Undo, and Close are
   workspace controls.
 - Replace/Swap/Delete, collision results, height results, match visibility, and
   match exclusions are Tile Operation controls.

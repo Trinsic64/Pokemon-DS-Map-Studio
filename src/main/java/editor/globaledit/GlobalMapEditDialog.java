@@ -1031,7 +1031,7 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private JPanel createActionButtons() {
-        JPanel buttons = new JPanel(new GridLayout(1, 5, 4, 0));
+        JPanel buttons = new JPanel(new GridLayout(1, 4, 4, 0));
         JButton apply = new JButton("Apply");
         apply.setMargin(new Insets(2, 2, 2, 2));
         apply.setToolTipText(
@@ -1046,10 +1046,6 @@ public final class GlobalMapEditDialog extends JDialog {
         undo.setMargin(new Insets(2, 2, 2, 2));
         undo.setToolTipText("Undo the most recent map edit");
         undo.addActionListener(e -> undoLastEdit());
-        JButton save = new JButton("Save");
-        save.setMargin(new Insets(2, 2, 2, 2));
-        save.setToolTipText("Save the complete PDSMS map project");
-        save.addActionListener(e -> owner.saveMapProjectFromGlobalEditor());
         JButton close = new JButton("Close");
         close.setMargin(new Insets(2, 2, 2, 2));
         close.setToolTipText("Close Global Map Editor; already applied edits remain undoable");
@@ -1057,7 +1053,6 @@ public final class GlobalMapEditDialog extends JDialog {
         buttons.add(apply);
         buttons.add(applyAll);
         buttons.add(undo);
-        buttons.add(save);
         buttons.add(close);
         getRootPane().setDefaultButton(apply);
         return buttons;
