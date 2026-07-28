@@ -19,6 +19,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -44,6 +45,8 @@ public final class GlobalMapEditDialog extends JDialog {
     private final LayerScopePreview[] layerPreviews = new LayerScopePreview[MapGrid.numLayers];
     private final boolean[] previewLayerVisible = new boolean[MapGrid.numLayers];
     private final JTabbedPane operations = new JTabbedPane();
+    private final CardLayout scopeCardLayout = new CardLayout();
+    private final JPanel scopeCards = new JPanel(scopeCardLayout);
     private final JLabel status = new JLabel("Choose chunks, layers, and an operation.");
     private final JLabel operationHint = new JLabel(" ");
 
@@ -52,6 +55,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private final JLabel sourceSummary = new JLabel(" ");
     private final JLabel replacementSummary = new JLabel(" ");
     private final JLabel replaceSummary = new JLabel(" ");
+    private final JTextArea tileModeExplanation = new JTextArea();
     private final JLabel sourceHeaderSummary = new JLabel(" ");
     private final JLabel replacementHeaderSummary = new JLabel(" ");
     private final JLabel sourceHeaderIcon = new JLabel();
@@ -63,13 +67,13 @@ public final class GlobalMapEditDialog extends JDialog {
     private int replacementTileIndex;
     private int selectedPreviewLayer;
 
-    private final JRadioButton replaceMode = new JRadioButton("Replace", true);
-    private final JRadioButton swapTiles = new JRadioButton("Swap");
-    private final JRadioButton deleteMode = new JRadioButton("Delete");
+    private final JRadioButton replaceMode = new JRadioButton("Replace A \u2192 B", true);
+    private final JRadioButton swapTiles = new JRadioButton("Swap A \u2194 B");
+    private final JRadioButton deleteMode = new JRadioButton("Delete A");
     private final JRadioButton keepCollisions =
             new JRadioButton("Keep collisions", true);
     private final JRadioButton refreshCollisionDefaults =
-            new JRadioButton("Smart collisions");
+            new JRadioButton("Rebuild smart collisions");
 
     private final JComboBox<String> copySourceLayer = createLayerCombo();
     private final JComboBox<String> copyTargetLayer = createLayerCombo();
@@ -510,6 +514,15 @@ public final class GlobalMapEditDialog extends JDialog {
         previewStats.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
         controls.add(previewStats);
 
+        JTextArea commonScope = createInfoText(
+                "Apply: shown selected chunk.  Apply All: every selected matrix chunk.");
+        commonScope.setAlignmentX(Component.LEFT_ALIGNMENT);
+        commonScope.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
+        controls.add(commonScope);
+        controls.add(Box.createVerticalStrut(6));
+
+        JPanel tileScope = new JPanel();
+        tileScope.setLayout(new BoxLayout(tileScope, BoxLayout.Y_AXIS));
         resetCellSelection.setText("Reset");
         resetCellSelection.setFocusable(false);
         resetCellSelection.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -521,31 +534,54 @@ public final class GlobalMapEditDialog extends JDialog {
             excludedMatches.clear();
             refreshPreview();
         });
-        controls.add(resetCellSelection);
-        controls.add(Box.createVerticalStrut(4));
+        tileScope.add(resetCellSelection);
+        tileScope.add(Box.createVerticalStrut(4));
 
         showMatchHighlights.setFocusable(false);
         showMatchHighlights.setAlignmentX(Component.LEFT_ALIGNMENT);
         showMatchHighlights.setToolTipText(
                 "Outline included matches on Current Map; Preview Map always stays clean");
         showMatchHighlights.addActionListener(e -> beforePreview.repaint());
-        controls.add(showMatchHighlights);
-        controls.add(Box.createVerticalStrut(4));
+        tileScope.add(showMatchHighlights);
+        tileScope.add(Box.createVerticalStrut(4));
 
+        JLabel clickHelp = new JLabel("A: click \u00b7 B: Shift \u00b7 Exclude: Ctrl/right");
+        clickHelp.setToolTipText("Use Current Map to pick visible tiles or exclude "
+                + "individual matches; enable Show matches when refining the cell scope");
+        clickHelp.setAlignmentX(Component.LEFT_ALIGNMENT);
+        tileScope.add(clickHelp);
+        scopeCards.add(tileScope, "tiles");
+
+        JPanel heightScope = new JPanel();
+        heightScope.setLayout(new BoxLayout(heightScope, BoxLayout.Y_AXIS));
         showHeightNumbers.setFocusable(false);
         showHeightNumbers.setAlignmentX(Component.LEFT_ALIGNMENT);
         showHeightNumbers.setToolTipText(
                 "Overlay the Main UI height indicators for the yellow-selected layer");
         showHeightNumbers.addActionListener(e -> refreshPreview());
         updateHeightToggleLabel();
-        controls.add(showHeightNumbers);
-        controls.add(Box.createVerticalStrut(4));
+        heightScope.add(showHeightNumbers);
+        heightScope.add(Box.createVerticalStrut(5));
+        heightScope.add(createInfoText(
+                "Click a layer card to choose the yellow height-preview layer."));
+        scopeCards.add(heightScope, "height");
 
-        JLabel clickHelp = new JLabel("A: click \u00b7 B: Shift \u00b7 Toggle: Ctrl/right");
-        clickHelp.setToolTipText("Use Current Map to pick visible tiles or toggle "
-                + "individual matches; enable Show matches when refining the cell scope");
-        clickHelp.setAlignmentX(Component.LEFT_ALIGNMENT);
-        controls.add(clickHelp);
+        JPanel copyScope = new JPanel();
+        copyScope.setLayout(new BoxLayout(copyScope, BoxLayout.Y_AXIS));
+        copyScope.add(createInfoText(
+                "Copy uses the source and target layer selectors in the operation panel. "
+                        + "The left layer checkboxes and tile-match exclusions do not apply."));
+        scopeCards.add(copyScope, "copy");
+
+        JPanel clearScope = new JPanel();
+        clearScope.setLayout(new BoxLayout(clearScope, BoxLayout.Y_AXIS));
+        clearScope.add(createInfoText(
+                "Clear uses the selected matrix chunks and the checked layers on the left."));
+        scopeCards.add(clearScope, "clear");
+
+        scopeCards.setAlignmentX(Component.LEFT_ALIGNMENT);
+        scopeCards.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
+        controls.add(scopeCards);
         panel.add(controls, BorderLayout.NORTH);
         return panel;
     }
@@ -589,8 +625,10 @@ public final class GlobalMapEditDialog extends JDialog {
         tileModes.add(replaceMode);
         tileModes.add(swapTiles);
         tileModes.add(deleteMode);
-        replaceMode.setToolTipText("Replace every included A occurrence with B");
-        swapTiles.setToolTipText("Exchange A and B in both directions");
+        replaceMode.setToolTipText(
+                "Change included A occurrences to B; existing B occurrences stay B");
+        swapTiles.setToolTipText(
+                "Exchange both directions: included A becomes B and included B becomes A");
         deleteMode.setToolTipText("Remove included A occurrences, leaving heights unchanged");
         JPanel modes = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         modes.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -600,6 +638,15 @@ public final class GlobalMapEditDialog extends JDialog {
         modes.add(swapTiles);
         modes.add(deleteMode);
         action.add(modes);
+        action.add(Box.createVerticalStrut(7));
+        tileModeExplanation.setEditable(false);
+        tileModeExplanation.setFocusable(false);
+        tileModeExplanation.setOpaque(false);
+        tileModeExplanation.setLineWrap(true);
+        tileModeExplanation.setWrapStyleWord(true);
+        tileModeExplanation.setFont(UIManager.getFont("Label.font"));
+        tileModeExplanation.setAlignmentX(Component.LEFT_ALIGNMENT);
+        action.add(tileModeExplanation);
         action.add(Box.createVerticalGlue());
 
         JPanel collision = createOptionGroup("Collision data");
@@ -608,20 +655,20 @@ public final class GlobalMapEditDialog extends JDialog {
         collisions.add(refreshCollisionDefaults);
         keepCollisions.setToolTipText("Tile IDs change; existing collision cells are untouched");
         refreshCollisionDefaults.setToolTipText(
-                "Reapply tileset collision defaults after the tile change");
+                "Recalculate tileset collision defaults for each changed map after the tile edit");
         keepCollisions.setAlignmentX(Component.LEFT_ALIGNMENT);
         refreshCollisionDefaults.setAlignmentX(Component.LEFT_ALIGNMENT);
         collision.add(keepCollisions);
         collision.add(refreshCollisionDefaults);
         collision.add(Box.createVerticalStrut(8));
-        collision.add(createInfoText("Height values are never changed by tile operations."));
+        collision.add(createInfoText("Heights never change. Rebuild updates defined smart "
+                + "collision defaults across each changed map; Keep leaves collision data alone."));
         collision.add(Box.createVerticalGlue());
 
         JPanel scope = createOptionGroup("Where it applies");
-        scope.add(createInfoText("Checked layers define which tile occurrences qualify.\n\n"
-                + "Apply changes only the map currently shown. Apply All changes every "
-                + "selected matrix chunk.\n\nCtrl/right-click Current Map to exclude "
-                + "individual matches."));
+        scope.add(createInfoText("Checked layers define which occurrences qualify.\n\n"
+                + "Replace and Delete match A. Swap matches both A and B.\n\n"
+                + "Ctrl/right-click Current Map to exclude individual matches."));
         return operationColumns(action, collision, scope);
     }
 
@@ -814,14 +861,27 @@ public final class GlobalMapEditDialog extends JDialog {
         clearHeights.addActionListener(e -> refreshPreview());
         keepCollisions.addActionListener(e -> refreshPreview());
         refreshCollisionDefaults.addActionListener(e -> refreshPreview());
-        operations.addChangeListener(e -> {
-            if (operations.getSelectedIndex() == 2) {
-                showHeightNumbers.setSelected(true);
-            }
-            updateOperationHint();
-            refreshPreview();
-        });
+        operations.addChangeListener(e -> operationChanged());
+        updateTileModeExplanation();
+        operationChanged();
+    }
+
+    private void operationChanged() {
+        int operation = operations.getSelectedIndex();
+        showHeightNumbers.setSelected(operation == 2);
+        scopeCardLayout.show(scopeCards, operation == 0 ? "tiles"
+                : operation == 1 ? "copy"
+                : operation == 2 ? "height" : "clear");
+
+        boolean usesCheckedLayers = operation != 1;
+        for (int layer = 0; layer < layerChecks.length; layer++) {
+            layerChecks[layer].setEnabled(usesCheckedLayers);
+            layerChecks[layer].setToolTipText(usesCheckedLayers
+                    ? "Include Layer " + (layer + 1) + " in this operation"
+                    : "Copy uses the source and target layer selectors; this checkbox is not used");
+        }
         updateOperationHint();
+        refreshPreview();
     }
 
     private void tileModeChanged() {
@@ -834,8 +894,18 @@ public final class GlobalMapEditDialog extends JDialog {
         }
         excludedMatches.clear();
         updateTileSummaries();
+        updateTileModeExplanation();
         updateOperationHint();
         refreshPreview();
+    }
+
+    private void updateTileModeExplanation() {
+        String explanation = deleteMode.isSelected()
+                ? "Removes A only. Empty cells retain their existing height values."
+                : swapTiles.isSelected()
+                ? "Two-way exchange: A becomes B and B becomes A."
+                : "One-way change: A becomes B; tiles already using B stay unchanged.";
+        tileModeExplanation.setText(explanation);
     }
 
     private void installKeyboardActions() {
@@ -1784,30 +1854,73 @@ public final class GlobalMapEditDialog extends JDialog {
         return button;
     }
 
-    private static ImageIcon createEyeIcon(boolean visible) {
-        BufferedImage image = new BufferedImage(20, 18, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = image.createGraphics();
-        try {
-            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            graphics.setStroke(new BasicStroke(1.7f, BasicStroke.CAP_ROUND,
-                    BasicStroke.JOIN_ROUND));
-            graphics.setColor(new Color(235, 245, 245));
-            if (visible) {
-                graphics.drawArc(2, 4, 16, 10, 0, 180);
-                graphics.drawArc(2, 4, 16, 10, 180, 180);
-                graphics.fillOval(8, 7, 4, 4);
-            } else {
-                graphics.drawArc(2, 5, 16, 8, 180, 180);
-                graphics.drawLine(4, 11, 2, 14);
-                graphics.drawLine(8, 13, 7, 16);
-                graphics.drawLine(12, 13, 13, 16);
-                graphics.drawLine(16, 11, 18, 14);
-            }
-        } finally {
-            graphics.dispose();
+    private static Icon createVisibilityIcon(boolean visible) {
+        return new VisibilityIcon(visible);
+    }
+
+    /** Compact vector visibility icon that remains crisp at display scaling. */
+    private static final class VisibilityIcon implements Icon {
+
+        private static final int WIDTH = 20;
+        private static final int HEIGHT = 18;
+        private final boolean visible;
+
+        private VisibilityIcon(boolean visible) {
+            this.visible = visible;
         }
-        return new ImageIcon(image);
+
+        @Override
+        public int getIconWidth() {
+            return WIDTH;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return HEIGHT;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                g2.translate(x, y);
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                Color foreground = component.isEnabled()
+                        ? UIManager.getColor("Label.foreground")
+                        : UIManager.getColor("Label.disabledForeground");
+                if (foreground == null) {
+                    foreground = Color.WHITE;
+                }
+                g2.setColor(foreground);
+                g2.setStroke(new BasicStroke(1.65f, BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+
+                Path2D eye = new Path2D.Float();
+                eye.moveTo(1.5, 9);
+                eye.curveTo(5.1, 3.4, 14.9, 3.4, 18.5, 9);
+                eye.curveTo(14.9, 14.6, 5.1, 14.6, 1.5, 9);
+                g2.draw(eye);
+                g2.drawOval(7, 6, 6, 6);
+                g2.fillOval(9, 8, 2, 2);
+
+                if (!visible) {
+                    Color background = component.getParent() == null
+                            ? component.getBackground()
+                            : component.getParent().getBackground();
+                    g2.setColor(background == null ? new Color(55, 58, 60) : background);
+                    g2.setStroke(new BasicStroke(4.2f, BasicStroke.CAP_ROUND,
+                            BasicStroke.JOIN_ROUND));
+                    g2.drawLine(2, 2, 18, 16);
+                    g2.setColor(foreground);
+                    g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND,
+                            BasicStroke.JOIN_ROUND));
+                    g2.drawLine(2, 2, 18, 16);
+                }
+            } finally {
+                g2.dispose();
+            }
+        }
     }
 
     private static final class PreviewTile {
@@ -1850,8 +1963,8 @@ public final class GlobalMapEditDialog extends JDialog {
             visibilityButton.setBorderPainted(false);
             visibilityButton.setContentAreaFilled(false);
             visibilityButton.setOpaque(false);
-            visibilityButton.setIcon(createEyeIcon(false));
-            visibilityButton.setSelectedIcon(createEyeIcon(true));
+            visibilityButton.setIcon(createVisibilityIcon(false));
+            visibilityButton.setSelectedIcon(createVisibilityIcon(true));
             visibilityButton.setToolTipText("Show or hide Layer " + (layer + 1)
                     + " in Current Map and Preview Map");
             visibilityButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -2086,7 +2199,8 @@ public final class GlobalMapEditDialog extends JDialog {
                         RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
                 g2.drawImage(image, mapBounds.x, mapBounds.y,
                         mapBounds.width, mapBounds.height, null);
-                if (showHeightNumbers.isSelected()) {
+                if (operations.getSelectedIndex() == 2
+                        && showHeightNumbers.isSelected()) {
                     drawHeightNumbers(g2, data);
                 }
                 drawAffectedCells(g2, data);
@@ -2126,7 +2240,8 @@ public final class GlobalMapEditDialog extends JDialog {
 
         private void drawHeightNumbers(Graphics2D graphics, MapData data) {
             int layer = selectedPreviewLayer;
-            if (layer < 0 || layer >= MapGrid.numLayers
+            if (operations.getSelectedIndex() != 2
+                    || layer < 0 || layer >= MapGrid.numLayers
                     || !previewLayerVisible[layer]) {
                 return;
             }

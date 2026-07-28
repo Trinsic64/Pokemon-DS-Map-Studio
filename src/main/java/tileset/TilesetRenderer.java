@@ -91,8 +91,10 @@ public class TilesetRenderer {
 
             gl = drawable.getGL().getGL2();
 
-            //gl.glClearColor(0.0f, 0.5f, 0.5f, 0.0f); //Use this for transparent background
-            gl.glClearColor(0.0f, 0.5f, 0.5f, 1.0f);
+            //Keep uncovered pixels transparent. Map previews and palette
+            //thumbnails can then composite tiles over the layers below them
+            //instead of drawing opaque teal rectangles.
+            gl.glClearColor(0.0f, 0.5f, 0.5f, 0.0f);
 
             previousTextures = new ArrayList<>(tileset.getTextures());
             tileset.loadTexturesGL();
@@ -139,12 +141,12 @@ public class TilesetRenderer {
 
             setupVAOsVBOs(tile);
 
-            drawOpaqueTile(tile, height); //NEW CODE REMOVED Remove this for transparent background
+            drawOpaqueTile(tile, height);
             drawTransparentTile(tile, height);
 
-            //BufferedImage img = new AWTGLReadBufferUtil(drawable.getGLProfile(), false).readPixelsToBufferedImage(drawable.getGL(), 0, 0, tile.getWidth() * tileSize, tile.getHeight() * tileSize, true /* awtOrientation */);
-            //BufferedImage img = new AWTGLReadBufferUtil(drawable.getGLProfile(), true).readPixelsToBufferedImage(drawable.getGL(), true /* awtOrientation */); //Use this for transparent background
-            BufferedImage img = new AWTGLReadBufferUtil(drawable.getGLProfile(), false).readPixelsToBufferedImage(drawable.getGL(), true /* awtOrientation */);
+            BufferedImage img = new AWTGLReadBufferUtil(
+                    drawable.getGLProfile(), true)
+                    .readPixelsToBufferedImage(drawable.getGL(), true);
             return img.getSubimage(0, 0, width * tileSize, height * tileSize);
     }
 

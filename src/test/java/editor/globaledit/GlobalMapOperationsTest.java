@@ -11,6 +11,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class GlobalMapOperationsTest {
 
     @Test
+    void replaceIsOneWayAndLeavesExistingReplacementTilesAlone() {
+        MapGrid grid = new MapGrid(null);
+        grid.tileLayers[0][0][0] = 4;
+        grid.tileLayers[0][1][0] = 7;
+
+        int changed = GlobalMapOperations.replaceTiles(
+                grid, new int[]{0}, 4, 7, false);
+
+        assertEquals(1, changed);
+        assertEquals(7, grid.tileLayers[0][0][0]);
+        assertEquals(7, grid.tileLayers[0][1][0]);
+    }
+
+    @Test
     void replacesOnlyRequestedLayersAndCanSwapBothDirections() {
         MapGrid grid = new MapGrid(null);
         grid.tileLayers[0][0][0] = 4;

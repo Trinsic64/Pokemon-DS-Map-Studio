@@ -72,12 +72,18 @@ public class MainFrame extends JFrame {
     private JMenuItem jmiGlobalEdit;
     private JMenuItem jmiImportTileMetadata;
     private JMenuItem jmiExportTileMetadata;
-    private JMenuItem jmiReplaceRemap;
     private JLabel jlCursorCoordsTitle;
     private JLabel jlCursorCoords;
     private GlobalMapEditDialog globalMapEditor;
 
     public static void main(String[] args) {
+        //FlatLaf 3 embeds the menu in a custom title bar by default on Windows.
+        //PDSMS traditionally uses the operating system title bar with the
+        //File/Edit/View/Tools/Help menu on its own row.
+        System.setProperty("flatlaf.useWindowDecorations", "false");
+        System.setProperty("flatlaf.menuBarEmbedded", "false");
+        JFrame.setDefaultLookAndFeelDecorated(false);
+        JDialog.setDefaultLookAndFeelDecorated(false);
         try {
             String theme = prefs.get("Theme", "Native");
             switch (theme) {
@@ -133,7 +139,9 @@ public class MainFrame extends JFrame {
     }
 
     public MainFrame() {
+        getRootPane().setWindowDecorationStyle(JRootPane.NONE);
         initComponents();
+        restoreClassicMenuBar();
         initCustomComponents();
 
         jscTileList.getVerticalScrollBar().setUnitIncrement(16);
@@ -330,11 +338,6 @@ public class MainFrame extends JFrame {
         jmEdit.insert(jmiFillSelection, 16);
         jmEdit.insert(jmiDeselect, 17);
 
-        jmiReplaceRemap = new JMenuItem("Advanced Batch Remap...");
-        jmiReplaceRemap.setIcon(new ImageIcon(getClass().getResource("/icons/ReplaceIcon.png")));
-        jmiReplaceRemap.setToolTipText(
-                "Batch several tile replacements and remap collision permissions or types");
-        jmiReplaceRemap.addActionListener(e -> toolDialogLauncher.openReplaceRemap());
         jmiGlobalEdit = new JMenuItem("Global Map Editor...");
         jmiGlobalEdit.setAccelerator(KeyStroke.getKeyStroke(
                 KeyEvent.VK_G, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK));
@@ -343,10 +346,8 @@ public class MainFrame extends JFrame {
         jmiGlobalEdit.addActionListener(e -> openGlobalMapEditor());
         int settingsIndex = jmEdit.getPopupMenu().getComponentIndex(menuItem1);
         //The generated menu already has a separator immediately before
-        //Settings. Insert the global tools into that existing section instead
-        //of creating a second empty divider.
+        //Settings. Insert the global editor into that existing section.
         jmEdit.insert(jmiGlobalEdit, settingsIndex);
-        jmEdit.insert(jmiReplaceRemap, settingsIndex + 1);
 
         //Status bar: rename the selected map readout and add the cursor tile
         //coordinates next to it
@@ -367,6 +368,33 @@ public class MainFrame extends JFrame {
         setSize(fittedWidth, fittedHeight);
         setLocation(usable.x + (usable.width - fittedWidth) / 2,
                 usable.y + (usable.height - fittedHeight) / 2);
+    }
+
+    private void restoreClassicMenuBar() {
+        //Ensure a FlatLaf title pane is not left between the native title bar
+        //and the normal Swing menu row.
+        getRootPane().setWindowDecorationStyle(JRootPane.NONE);
+        //Use the same palette as the menus themselves. Some modern FlatLaf
+        //themes assign a light title-pane color to MenuBar.background even
+        //when the application and popup menus are dark.
+        Color background = UIManager.getColor("MenuItem.background");
+        Color foreground = UIManager.getColor("MenuItem.foreground");
+        if (background == null) {
+            background = UIManager.getColor("Panel.background");
+        }
+        if (foreground == null) {
+            foreground = UIManager.getColor("Label.foreground");
+        }
+        if (background != null) {
+            jmMainMenu.setBackground(background);
+        }
+        jmMainMenu.setOpaque(true);
+        jmMainMenu.setBorderPainted(false);
+        for (Component component : jmMainMenu.getComponents()) {
+            if (component instanceof JMenu) {
+                component.setForeground(foreground);
+            }
+        }
     }
 
     private int toolGroupWidth = 0;
