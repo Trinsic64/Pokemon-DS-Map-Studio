@@ -19,6 +19,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -37,6 +38,28 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private static final Color PREVIEW_BACKGROUND = new Color(0, 127, 127);
     private static final int VIEW_PADDING = 6;
+
+    static boolean picksSourceTile(boolean previewMap, boolean shiftDown) {
+        return previewMap == shiftDown;
+    }
+
+    static int comparePreviewDrawOrder(
+            int leftHeight, int leftY, int leftLayer, int leftX,
+            int rightHeight, int rightY, int rightLayer, int rightX) {
+        int comparison = Integer.compare(leftHeight, rightHeight);
+        if (comparison != 0) {
+            return comparison;
+        }
+        comparison = Integer.compare(rightY, leftY);
+        if (comparison != 0) {
+            return comparison;
+        }
+        comparison = Integer.compare(rightLayer, leftLayer);
+        if (comparison != 0) {
+            return comparison;
+        }
+        return Integer.compare(leftX, rightX);
+    }
 
     private final MainFrame owner;
     private final MapEditorHandler handler;
@@ -89,7 +112,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private final JComboBox<MapChoice> previewMapChoice = new JComboBox<>();
     private final JTextArea previewStats = new JTextArea(2, 20);
     private final JButton resetCellSelection = new JButton("Include all matches");
-    private final JCheckBox showMatchHighlights = new JCheckBox("Show matches");
+    private final JCheckBox showMatchHighlights = new JCheckBox("Show matches", true);
     private final JCheckBox showHeightNumbers = new JCheckBox("Height numbers");
     private final MapPreviewCanvas beforePreview;
     private final MapPreviewCanvas afterPreview;
@@ -107,8 +130,8 @@ public final class GlobalMapEditDialog extends JDialog {
         this.matrixSelection =
                 new MatrixSelectionPanel(handler, this::matrixSelectionChanged,
                         this::previewMatrixChunk);
-        this.beforePreview = new MapPreviewCanvas(false, true);
-        this.afterPreview = new MapPreviewCanvas(true, false);
+        this.beforePreview = new MapPreviewCanvas(false);
+        this.afterPreview = new MapPreviewCanvas(true);
 
         int selectedTile = clampTileIndex(handler.getTileIndexSelected());
         sourceTileIndex = selectedTile;
@@ -435,9 +458,11 @@ public final class GlobalMapEditDialog extends JDialog {
         chooser.add(next);
         mapPanel.add(chooser, BorderLayout.NORTH);
 
-        JLabel instruction = new JLabel("Map clicks: A \u00b7 Shift B \u00b7 Ctrl/right toggle");
-        instruction.setToolTipText("Click a visible tile for A; Shift-click for B; "
-                + "Ctrl-click or right-click a highlighted match to include or exclude it");
+        JLabel instruction = new JLabel(
+                "Current: click A \u00b7 Shift B    Preview: click B \u00b7 Shift A");
+        instruction.setToolTipText("Current Map picks A first and B with Shift. "
+                + "Preview Map picks B first and A with Shift. Ctrl/right-click "
+                + "Current Map to include or exclude a match.");
         instruction.setForeground(UIManager.getColor("Label.disabledForeground"));
         instruction.setHorizontalAlignment(SwingConstants.CENTER);
         mapPanel.add(instruction, BorderLayout.SOUTH);
@@ -480,7 +505,7 @@ public final class GlobalMapEditDialog extends JDialog {
         JPanel previewPanel = new JPanel(new BorderLayout());
         previewPanel.setBorder(BorderFactory.createTitledBorder("Preview Map"));
         previewPanel.setToolTipText(
-                "The selected operation rendered beside the unmodified map");
+                "The proposed result; click a visible tile for B or Shift-click for A");
         previewPanel.add(new SquareViewport(afterPreview, VIEW_PADDING),
                 BorderLayout.CENTER);
         panel.add(previewPanel);
@@ -540,14 +565,14 @@ public final class GlobalMapEditDialog extends JDialog {
         showMatchHighlights.setFocusable(false);
         showMatchHighlights.setAlignmentX(Component.LEFT_ALIGNMENT);
         showMatchHighlights.setToolTipText(
-                "Outline included matches on Current Map; Preview Map always stays clean");
+                "Show a faint whole-tile outline around included matches on Current Map");
         showMatchHighlights.addActionListener(e -> beforePreview.repaint());
         tileScope.add(showMatchHighlights);
         tileScope.add(Box.createVerticalStrut(4));
 
-        JLabel clickHelp = new JLabel("A: click \u00b7 B: Shift \u00b7 Exclude: Ctrl/right");
-        clickHelp.setToolTipText("Use Current Map to pick visible tiles or exclude "
-                + "individual matches; enable Show matches when refining the cell scope");
+        JLabel clickHelp = new JLabel("Current: A/Shift B \u00b7 Preview: B/Shift A");
+        clickHelp.setToolTipText("Ctrl-click or right-click Current Map to include "
+                + "or exclude individual matches");
         clickHelp.setAlignmentX(Component.LEFT_ALIGNMENT);
         tileScope.add(clickHelp);
         scopeCards.add(tileScope, "tiles");
@@ -1276,6 +1301,8 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private void refreshPreview() {
+        beforePreview.clearHover();
+        afterPreview.clearHover();
         beforePreview.repaint();
         afterPreview.repaint();
         updatePreviewStats();
@@ -1471,10 +1498,12 @@ public final class GlobalMapEditDialog extends JDialog {
                 }
             }
         }
-        draws.sort(Comparator.comparingInt((PreviewTile draw) -> draw.height)
-                .thenComparing((left, right) -> Integer.compare(right.y, left.y))
-                .thenComparingInt(draw -> draw.layer)
-                .thenComparingInt(draw -> draw.x));
+        //The Main UI renders layers from low to high with GL_LESS. At equal
+        //depth the first (lower-numbered) layer remains visible, so paint
+        //higher layers first and lower layers last in Java2D.
+        draws.sort((left, right) -> comparePreviewDrawOrder(
+                left.height, left.y, left.layer, left.x,
+                right.height, right.y, right.layer, right.x));
         return draws;
     }
 
@@ -2122,54 +2151,73 @@ public final class GlobalMapEditDialog extends JDialog {
     private final class MapPreviewCanvas extends JComponent {
 
         private final boolean after;
-        private final boolean interactive;
         private Rectangle mapBounds = new Rectangle();
+        private PreviewTile hoveredTile;
 
-        private MapPreviewCanvas(boolean after, boolean interactive) {
+        private MapPreviewCanvas(boolean after) {
             this.after = after;
-            this.interactive = interactive;
             setPreferredSize(new Dimension(440, 440));
             setMinimumSize(new Dimension(260, 260));
             setOpaque(true);
             setToolTipText("");
-            if (interactive) {
-                setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
-                addMouseListener(new MouseAdapter() {
-                    @Override
-                    public void mousePressed(MouseEvent event) {
-                        if (SwingUtilities.isRightMouseButton(event)
-                                || (SwingUtilities.isLeftMouseButton(event)
-                                && event.isControlDown())) {
+            setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+            MouseAdapter mouse = new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent event) {
+                    if (SwingUtilities.isRightMouseButton(event)
+                            || (SwingUtilities.isLeftMouseButton(event)
+                            && event.isControlDown())) {
+                        if (!after) {
                             Point cell = cellAt(event.getPoint());
                             if (cell != null) {
                                 togglePreviewCell(cell.x, cell.y);
                             }
-                            return;
-                        }
-                        if (!SwingUtilities.isLeftMouseButton(event)) {
-                            return;
-                        }
-                        int tileIndex = tileAt(event.getPoint());
-                        if (tileIndex < 0) {
-                            status.setText("No visible tile was found at that point.");
-                            return;
-                        }
-                        if (event.isShiftDown()) {
-                            setReplacementTileIndex(tileIndex);
-                            replacementBrowser.setReadOnlySelectedIndex(tileIndex);
-                            scrollTileBrowserToSelection(replacementBrowser);
-                            status.setText("Picked replacement tile B: "
-                                    + tilePickerDescription(tileIndex));
                         } else {
-                            setSourceTileIndex(tileIndex);
-                            sourceBrowser.setReadOnlySelectedIndex(tileIndex);
-                            scrollTileBrowserToSelection(sourceBrowser);
-                            status.setText("Picked find tile A: "
-                                    + tilePickerDescription(tileIndex));
+                            status.setText("Use Current Map to include or exclude matches.");
                         }
+                        return;
                     }
-                });
-            }
+                    if (!SwingUtilities.isLeftMouseButton(event)) {
+                        return;
+                    }
+                    int tileIndex = tileAt(event.getPoint());
+                    if (tileIndex < 0) {
+                        status.setText("No visible tile was found at that point.");
+                        return;
+                    }
+                    boolean pickSource =
+                            picksSourceTile(after, event.isShiftDown());
+                    if (pickSource) {
+                        setSourceTileIndex(tileIndex);
+                        sourceBrowser.setReadOnlySelectedIndex(tileIndex);
+                        scrollTileBrowserToSelection(sourceBrowser);
+                        status.setText("Picked find tile A: "
+                                + tilePickerDescription(tileIndex));
+                    } else {
+                        setReplacementTileIndex(tileIndex);
+                        replacementBrowser.setReadOnlySelectedIndex(tileIndex);
+                        scrollTileBrowserToSelection(replacementBrowser);
+                        status.setText("Picked replacement tile B: "
+                                + tilePickerDescription(tileIndex));
+                    }
+                }
+
+                @Override
+                public void mouseMoved(MouseEvent event) {
+                    PreviewTile next = tileOccurrenceAt(event.getPoint());
+                    if (!sameOccurrence(hoveredTile, next)) {
+                        hoveredTile = next;
+                        repaint();
+                    }
+                }
+
+                @Override
+                public void mouseExited(MouseEvent event) {
+                    clearHover();
+                }
+            };
+            addMouseListener(mouse);
+            addMouseMotionListener(mouse);
         }
 
         @Override
@@ -2204,6 +2252,7 @@ public final class GlobalMapEditDialog extends JDialog {
                     drawHeightNumbers(g2, data);
                 }
                 drawAffectedCells(g2, data);
+                drawHoveredTile(g2);
                 g2.setStroke(new BasicStroke(2));
                 g2.setColor(after ? new Color(0, 220, 255) : Color.RED);
                 g2.drawRect(mapBounds.x, mapBounds.y,
@@ -2275,6 +2324,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 if (after) {
                     return;
                 }
+                Set<Rectangle> includedBounds = new LinkedHashSet<>();
+                Set<Rectangle> excludedBounds = new LinkedHashSet<>();
                 for (int x = 0; x < MapGrid.cols; x++) {
                     for (int y = 0; y < MapGrid.rows; y++) {
                         ArrayList<GlobalMapOperations.TileCell> matches =
@@ -2282,11 +2333,26 @@ public final class GlobalMapEditDialog extends JDialog {
                         if (matches.isEmpty()) {
                             continue;
                         }
-                        boolean allExcluded = excludedMatches.containsAll(matches);
-                        if (allExcluded || showMatchHighlights.isSelected()) {
-                            drawCellState(g2, x, y, allExcluded);
+                        for (GlobalMapOperations.TileCell match : matches) {
+                            boolean excluded = excludedMatches.contains(match);
+                            if (!excluded && !showMatchHighlights.isSelected()) {
+                                continue;
+                            }
+                            int tileIndex =
+                                    data.getGrid().tileLayers[match.layer][match.x][match.y];
+                            if (tileIndex < 0
+                                    || tileIndex >= handler.getTileset().size()) {
+                                continue;
+                            }
+                            Rectangle bounds = tileBounds(match.x, match.y,
+                                    handler.getTileset().get(tileIndex));
+                            (excluded ? excludedBounds : includedBounds).add(bounds);
                         }
                     }
+                }
+                drawIncludedTileStates(g2, includedBounds);
+                for (Rectangle bounds : excludedBounds) {
+                    drawExcludedTileState(g2, bounds);
                 }
             } else if (after && (operations.getSelectedIndex() == 2
                     || (operations.getSelectedIndex() == 3 && clearHeights.isSelected()))) {
@@ -2301,31 +2367,77 @@ public final class GlobalMapEditDialog extends JDialog {
                             affected = isHeightAffected(data, layer, x, y);
                         }
                         if (affected) {
-                            drawCellState(g2, x, y, false);
+                            drawCellState(g2, x, y);
                         }
                     }
                 }
             }
         }
 
-        private void drawCellState(Graphics2D g2, int x, int y, boolean excluded) {
-            Rectangle cell = cellBounds(x, y);
-            if (excluded) {
-                g2.setColor(new Color(220, 60, 60, 105));
-                g2.fillRect(cell.x, cell.y, cell.width, cell.height);
+        private void drawIncludedTileStates(Graphics2D g2,
+                                            Set<Rectangle> bounds) {
+            if (bounds.isEmpty()) {
+                return;
             }
-            g2.setColor(excluded ? new Color(255, 90, 90)
-                    : new Color(0, 235, 255, 175));
-            g2.setStroke(new BasicStroke(excluded
-                    ? Math.max(1.5f, mapBounds.width / 320f) : 1f));
+            Area combined = new Area();
+            for (Rectangle rectangle : bounds) {
+                combined.add(new Area(rectangle));
+            }
+            g2.setColor(new Color(105, 225, 240, 68));
+            g2.setStroke(new BasicStroke(1f));
+            g2.draw(combined);
+        }
+
+        private void drawExcludedTileState(Graphics2D g2,
+                                           Rectangle bounds) {
+            g2.setColor(new Color(220, 60, 60, 72));
+            g2.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            g2.setColor(new Color(255, 90, 90));
+            g2.setStroke(new BasicStroke(
+                    Math.max(1.5f, mapBounds.width / 320f)));
+            g2.drawRect(bounds.x, bounds.y,
+                    Math.max(0, bounds.width - 1), Math.max(0, bounds.height - 1));
+            g2.drawLine(bounds.x + 2, bounds.y + 2,
+                    bounds.x + bounds.width - 3,
+                    bounds.y + bounds.height - 3);
+            g2.drawLine(bounds.x + bounds.width - 3, bounds.y + 2,
+                    bounds.x + 2, bounds.y + bounds.height - 3);
+        }
+
+        private void drawCellState(Graphics2D g2, int x, int y) {
+            Rectangle cell = cellBounds(x, y);
+            g2.setColor(new Color(105, 225, 240, 72));
+            g2.setStroke(new BasicStroke(1f));
             g2.drawRect(cell.x, cell.y,
                     Math.max(0, cell.width - 1), Math.max(0, cell.height - 1));
-            if (excluded) {
-                g2.drawLine(cell.x + 2, cell.y + 2,
-                        cell.x + cell.width - 3, cell.y + cell.height - 3);
-                g2.drawLine(cell.x + cell.width - 3, cell.y + 2,
-                        cell.x + 2, cell.y + cell.height - 3);
+        }
+
+        private void drawHoveredTile(Graphics2D g2) {
+            if (hoveredTile == null) {
+                return;
             }
+            Tile tile = handler.getTileset().get(hoveredTile.tileIndex);
+            Rectangle bounds = tileBounds(hoveredTile.x, hoveredTile.y, tile);
+            g2.setColor(new Color(255, 255, 255, 20));
+            g2.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            g2.setColor(new Color(255, 255, 255, 105));
+            g2.setStroke(new BasicStroke(1f));
+            g2.drawRect(bounds.x, bounds.y,
+                    Math.max(0, bounds.width - 1), Math.max(0, bounds.height - 1));
+        }
+
+        private Rectangle tileBounds(int x, int y, Tile tile) {
+            int nativeSize = MapGrid.cols * 16;
+            int nativeX = x * 16;
+            int nativeY = (MapGrid.rows - y - tile.getHeight()) * 16;
+            int nativeRight = nativeX + tile.getWidth() * 16;
+            int nativeBottom = nativeY + tile.getHeight() * 16;
+            int x1 = mapBounds.x + nativeX * mapBounds.width / nativeSize;
+            int x2 = mapBounds.x + nativeRight * mapBounds.width / nativeSize;
+            int y1 = mapBounds.y + nativeY * mapBounds.height / nativeSize;
+            int y2 = mapBounds.y + nativeBottom * mapBounds.height / nativeSize;
+            return new Rectangle(x1, y1, Math.max(1, x2 - x1),
+                    Math.max(1, y2 - y1)).intersection(mapBounds);
         }
 
         private Rectangle cellBounds(int x, int y) {
@@ -2351,18 +2463,23 @@ public final class GlobalMapEditDialog extends JDialog {
         }
 
         private int tileAt(Point pixel) {
+            PreviewTile tile = tileOccurrenceAt(pixel);
+            return tile == null ? -1 : tile.tileIndex;
+        }
+
+        private PreviewTile tileOccurrenceAt(Point pixel) {
             if (!mapBounds.contains(pixel) || previewMap == null) {
-                return -1;
+                return null;
             }
             MapData data = handler.getMapMatrix().getMap(previewMap);
             if (data == null) {
-                return -1;
+                return null;
             }
             int nativeSize = MapGrid.cols * 16;
             int nativeX = (pixel.x - mapBounds.x) * nativeSize / mapBounds.width;
             int nativeY = (pixel.y - mapBounds.y) * nativeSize / mapBounds.height;
             ArrayList<PreviewTile> draws =
-                    previewTiles(data, previewMap, false, -1);
+                    previewTiles(data, previewMap, after, -1);
             for (int i = draws.size() - 1; i >= 0; i--) {
                 PreviewTile draw = draws.get(i);
                 Tile tile = handler.getTileset().get(draw.tileIndex);
@@ -2378,10 +2495,23 @@ public final class GlobalMapEditDialog extends JDialog {
                 if (localX >= 0 && localY >= 0
                         && localX < image.getWidth() && localY < image.getHeight()
                         && (image.getRGB(localX, localY) >>> 24) > 16) {
-                    return draw.tileIndex;
+                    return draw;
                 }
             }
-            return -1;
+            return null;
+        }
+
+        private boolean sameOccurrence(PreviewTile left, PreviewTile right) {
+            return left == right || (left != null && right != null
+                    && left.layer == right.layer && left.x == right.x
+                    && left.y == right.y && left.tileIndex == right.tileIndex);
+        }
+
+        private void clearHover() {
+            if (hoveredTile != null) {
+                hoveredTile = null;
+                repaint();
+            }
         }
 
         @Override
@@ -2391,11 +2521,18 @@ public final class GlobalMapEditDialog extends JDialog {
                 return null;
             }
             int tileIndex = tileAt(event.getPoint());
+            String picking = after
+                    ? "click for B, Shift-click for A"
+                    : "click for A, Shift-click for B";
+            if (after) {
+                return (tileIndex < 0 ? "Empty pixel" : tilePickerDescription(tileIndex))
+                        + " \u2014 " + picking;
+            }
             ArrayList<GlobalMapOperations.TileCell> matches =
                     matchingCellsAt(previewMap, cell.x, cell.y);
             if (matches.isEmpty()) {
                 return (tileIndex < 0 ? "Empty pixel" : tilePickerDescription(tileIndex))
-                        + " \u2014 click for A, Shift-click for B";
+                        + " \u2014 " + picking;
             }
             StringBuilder layers = new StringBuilder();
             for (GlobalMapOperations.TileCell match : matches) {
