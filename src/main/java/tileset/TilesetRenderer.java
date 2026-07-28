@@ -11,16 +11,16 @@ import static com.jogamp.opengl.GL.GL_GREATER;
 import static com.jogamp.opengl.GL.GL_LESS;
 import static com.jogamp.opengl.GL.GL_NEAREST;
 import static com.jogamp.opengl.GL.GL_NOTEQUAL;
-import static com.jogamp.opengl.GL.GL_ONE_MINUS_DST_ALPHA;
+import static com.jogamp.opengl.GL.GL_ONE;
 import static com.jogamp.opengl.GL.GL_ONE_MINUS_SRC_ALPHA;
 import static com.jogamp.opengl.GL.GL_REPEAT;
-import static com.jogamp.opengl.GL.GL_SRC_ALPHA;
 import static com.jogamp.opengl.GL.GL_TEXTURE_2D;
 import static com.jogamp.opengl.GL.GL_TEXTURE_MAG_FILTER;
 import static com.jogamp.opengl.GL.GL_TEXTURE_MIN_FILTER;
 import static com.jogamp.opengl.GL.GL_TEXTURE_WRAP_S;
 import static com.jogamp.opengl.GL.GL_TEXTURE_WRAP_T;
 import static com.jogamp.opengl.GL.GL_TRIANGLES;
+import static com.jogamp.opengl.GL.GL_ZERO;
 
 import com.jogamp.opengl.GL2;
 
@@ -91,10 +91,10 @@ public class TilesetRenderer {
 
             gl = drawable.getGL().getGL2();
 
-            //Keep uncovered pixels transparent. Map previews and palette
-            //thumbnails can then composite tiles over the layers below them
-            //instead of drawing opaque teal rectangles.
-            gl.glClearColor(0.0f, 0.5f, 0.5f, 0.0f);
+            //Transparent black is important here. A zero-alpha teal clear
+            //color still contributes hidden RGB during the legacy blend
+            //passes and makes every generated thumbnail look cyan-bright.
+            gl.glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
             previousTextures = new ArrayList<>(tileset.getTextures());
             tileset.loadTexturesGL();
@@ -147,7 +147,40 @@ public class TilesetRenderer {
             BufferedImage img = new AWTGLReadBufferUtil(
                     drawable.getGLProfile(), true)
                     .readPixelsToBufferedImage(drawable.getGL(), true);
-            return img.getSubimage(0, 0, width * tileSize, height * tileSize);
+            BufferedImage cropped =
+                    img.getSubimage(0, 0, width * tileSize, height * tileSize);
+            convertPremultipliedPixelsToStraightAlpha(cropped);
+            return cropped;
+    }
+
+    /**
+     * The OpenGL thumbnail pass uses the same premultiplied-alpha blending as
+     * the main map renderer. JOGL reads those bytes into a straight-alpha AWT
+     * image, so convert the RGB channels before Swing composites the image a
+     * second time.
+     */
+    static void convertPremultipliedPixelsToStraightAlpha(BufferedImage image) {
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int argb = image.getRGB(x, y);
+                int alpha = argb >>> 24;
+                if (alpha == 0) {
+                    image.setRGB(x, y, 0);
+                    continue;
+                }
+                if (alpha == 255) {
+                    continue;
+                }
+                int red = Math.min(255,
+                        (((argb >>> 16) & 0xff) * 255 + alpha / 2) / alpha);
+                int green = Math.min(255,
+                        (((argb >>> 8) & 0xff) * 255 + alpha / 2) / alpha);
+                int blue = Math.min(255,
+                        ((argb & 0xff) * 255 + alpha / 2) / alpha);
+                image.setRGB(x, y, (alpha << 24) | (red << 16)
+                        | (green << 8) | blue);
+            }
+        }
     }
 
     private void setupVAOsVBOs(Tile tile) {
@@ -268,7 +301,7 @@ public class TilesetRenderer {
 
         //Use program
         gl.glEnable(GL_BLEND);
-        gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA);
+        gl.glBlendFunc(GL_ONE, GL_ZERO);
 
         // adjust OpenGL settings and draw model
         gl.glEnable(GL_DEPTH_TEST);
@@ -285,7 +318,7 @@ public class TilesetRenderer {
 
         //Use program
         gl.glEnable(GL_BLEND);
-        gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gl.glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
         // adjust OpenGL settings and draw model
         gl.glEnable(GL_DEPTH_TEST);
