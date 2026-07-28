@@ -7,6 +7,8 @@ This build synchronizes the AdAstra v2.4 improvements with the Trinsic enhanced-
 - Added the **Global Map Editor** for visually selecting matrix chunks and applying tile replacement,
   bidirectional swaps, layer copies, height adjustments, and layer clearing.
 - Added tile thumbnails and names to global replacement controls instead of relying on numeric IDs alone.
+- Added independent L1-L9 edit scopes, row Apply controls, and removable rows for every selected Matrix chunk.
+- Added `GLOBAL_MAP_EDITOR_FEATURES.md` as the shared behaviour and future Operations reference.
 - Added per-layer editor opacity controls that do not modify exported map data.
 - Global edits across multiple maps and layers are recorded as one undoable operation.
 - Preserved the v2.4 safe **Replace and Remap** workflow for project-wide tile-ID remapping.

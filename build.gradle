@@ -83,7 +83,7 @@ tasks.register('portableDist', Sync) {
     from('converter') {
         into 'converter'
     }
-    from('README.md', 'RELEASE_NOTES.md')
+    from('README.md', 'RELEASE_NOTES.md', 'GLOBAL_MAP_EDITOR_FEATURES.md')
     filesMatching(['**/*.bat', '**/*.md', '**/*.ps1', '**/*.sh', '**/*.txt']) {
         filter { line -> line }
     }

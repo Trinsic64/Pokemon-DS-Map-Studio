@@ -11,6 +11,8 @@ import tileset.Tile;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
 import javax.swing.table.AbstractTableModel;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
@@ -67,11 +69,14 @@ public final class GlobalMapEditDialog extends JDialog {
     private final MainFrame owner;
     private final MapEditorHandler handler;
     private final MatrixSelectionPanel matrixSelection;
+    private final ChunkLayerScopes chunkLayerScopes;
     private final ChunkScopeTableModel chunkScopeModel;
     private final JTable chunkScopeTable;
     private final JCheckBox[] layerChecks = new JCheckBox[MapGrid.numLayers];
     private final LayerScopePreview[] layerPreviews = new LayerScopePreview[MapGrid.numLayers];
     private final boolean[] previewLayerVisible = new boolean[MapGrid.numLayers];
+    private JButton checkAllLayersButton;
+    private JButton uncheckAllLayersButton;
     private final JTabbedPane operations = new JTabbedPane();
     private final CardLayout scopeCardLayout = new CardLayout();
     private final JPanel scopeCards = new JPanel(scopeCardLayout);
@@ -126,6 +131,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private Point previewOnlyMap;
     private boolean updatingPreviewMapChoice;
     private boolean updatingChunkScopeTable;
+    private boolean updatingLayerChecks;
 
     public GlobalMapEditDialog(MainFrame owner, MapEditorHandler handler) {
         super(owner, "Global Map Editor", ModalityType.MODELESS);
@@ -133,11 +139,18 @@ public final class GlobalMapEditDialog extends JDialog {
         this.handler = handler;
         Arrays.fill(previewLayerVisible, true);
         selectedPreviewLayer = handler.getActiveLayerIndex();
+        this.chunkLayerScopes =
+                new ChunkLayerScopes(handler.getActiveLayerIndex());
         this.matrixSelection =
                 new MatrixSelectionPanel(handler, this::matrixSelectionChanged,
                         this::previewMatrixChunk);
         this.chunkScopeModel = new ChunkScopeTableModel();
-        this.chunkScopeTable = new JTable(chunkScopeModel);
+        this.chunkScopeTable = new JTable(chunkScopeModel) {
+            @Override
+            public String getToolTipText(MouseEvent event) {
+                return chunkScopeTooltip(this, event);
+            }
+        };
         this.beforePreview = new MapPreviewCanvas(false);
         this.afterPreview = new MapPreviewCanvas(true);
 
@@ -156,13 +169,14 @@ public final class GlobalMapEditDialog extends JDialog {
         add(createBody(), BorderLayout.CENTER);
         add(createButtonBar(), BorderLayout.SOUTH);
 
-        selectCurrentLayer();
+        chunkLayerScopes.synchronize(matrixSelection.getSelectedMaps());
         copySourceLayer.setSelectedIndex(handler.getActiveLayerIndex());
         copyTargetLayer.setSelectedIndex((handler.getActiveLayerIndex() + 1) % MapGrid.numLayers);
         installReactiveControls();
         updateTileSummaries();
         updateTileModeAvailability();
         refreshMapChoices(null);
+        loadLayerChecksForPreviewMap();
         refreshChunkScopeTable();
         refreshPreview();
         installKeyboardActions();
@@ -203,8 +217,14 @@ public final class GlobalMapEditDialog extends JDialog {
             int layer = i;
             layerChecks[i] = new JCheckBox();
             layerChecks[i].setToolTipText("Include Layer " + (i + 1)
-                    + " in operations that use the checked-layer scope");
+                    + " for the selected chunk");
             layerChecks[i].addItemListener(e -> {
+                if (!updatingLayerChecks && previewMap != null
+                        && chunkLayerScopes.contains(previewMap)) {
+                    chunkLayerScopes.setSelected(previewMap, layer,
+                            layerChecks[layer].isSelected());
+                    chunkScopeModel.fireLayerChanged(previewMap, layer);
+                }
                 layerPreviews[layer].repaint();
                 refreshSourceFilter();
                 refreshPreview();
@@ -222,13 +242,15 @@ public final class GlobalMapEditDialog extends JDialog {
         JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 3));
         JButton viewAll = compactButton("View All", "Show every layer in map height order");
         viewAll.addActionListener(e -> setAllPreviewLayersVisible(true));
-        JButton all = compactButton("Check All", "Include every layer in the operation");
-        all.addActionListener(e -> setAllLayers(true));
-        JButton none = compactButton("Uncheck", "Remove every layer from the operation scope");
-        none.addActionListener(e -> setAllLayers(false));
+        checkAllLayersButton = compactButton("Check All",
+                "Include every layer for the selected chunk");
+        checkAllLayersButton.addActionListener(e -> setAllLayers(true));
+        uncheckAllLayersButton = compactButton("Uncheck",
+                "Remove every layer from the selected chunk");
+        uncheckAllLayersButton.addActionListener(e -> setAllLayers(false));
         buttons.add(viewAll);
-        buttons.add(all);
-        buttons.add(none);
+        buttons.add(checkAllLayersButton);
+        buttons.add(uncheckAllLayersButton);
         panel.add(buttons, BorderLayout.SOUTH);
         return panel;
     }
@@ -501,6 +523,7 @@ public final class GlobalMapEditDialog extends JDialog {
             previewOnlyMap = choice != null && choice.previewOnly
                     ? new Point(choice.point) : null;
             matrixSelection.setPreviewMap(previewMap);
+            loadLayerChecksForPreviewMap();
             refreshLayerPreviews();
             refreshPreview();
         });
@@ -572,42 +595,18 @@ public final class GlobalMapEditDialog extends JDialog {
         panel.setPreferredSize(new Dimension(430, 720));
         panel.setMinimumSize(new Dimension(380, 520));
         panel.add(createMatrixPanel(), BorderLayout.NORTH);
-        panel.add(createScopeSettingsPanel(), BorderLayout.CENTER);
+        panel.add(createSelectedChunksPanel(), BorderLayout.CENTER);
         panel.add(createActionButtons(), BorderLayout.SOUTH);
         return panel;
     }
 
-    private JPanel createScopeSettingsPanel() {
-        JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createTitledBorder("Scope"));
+    private JPanel createOperationScopeStrip() {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createTitledBorder("Preview and scope options"));
 
-        JPanel controls = new JPanel();
-        controls.setBorder(new EmptyBorder(4, 5, 4, 5));
-        controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
-        previewStats.setEditable(false);
-        previewStats.setOpaque(false);
-        previewStats.setLineWrap(true);
-        previewStats.setWrapStyleWord(true);
-        previewStats.setFont(UIManager.getFont("Label.font"));
-        previewStats.setAlignmentX(Component.LEFT_ALIGNMENT);
-        previewStats.setBorder(new EmptyBorder(2, 0, 5, 0));
-        previewStats.setMaximumSize(new Dimension(Integer.MAX_VALUE, 46));
-        controls.add(previewStats);
-
-        JTextArea commonScope = createInfoText(
-                "Apply: shown selected chunk.  Apply All: every selected matrix chunk.");
-        commonScope.setAlignmentX(Component.LEFT_ALIGNMENT);
-        commonScope.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-        controls.add(commonScope);
-        controls.add(Box.createVerticalStrut(6));
-
-        JPanel tileScope = new JPanel();
-        tileScope.setLayout(new BoxLayout(tileScope, BoxLayout.Y_AXIS));
+        JPanel tileScope = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
         resetCellSelection.setText("Reset");
         resetCellSelection.setFocusable(false);
-        resetCellSelection.setAlignmentX(Component.LEFT_ALIGNMENT);
-        resetCellSelection.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                resetCellSelection.getPreferredSize().height));
         resetCellSelection.setToolTipText(
                 "Remove all per-cell exclusions so every matching occurrence is changed");
         resetCellSelection.addActionListener(e -> {
@@ -615,55 +614,42 @@ public final class GlobalMapEditDialog extends JDialog {
             refreshPreview();
         });
         tileScope.add(resetCellSelection);
-        tileScope.add(Box.createVerticalStrut(4));
 
         showMatchHighlights.setFocusable(false);
-        showMatchHighlights.setAlignmentX(Component.LEFT_ALIGNMENT);
         showMatchHighlights.setToolTipText(
                 "Show a faint whole-tile outline around included matches on Current Map");
         showMatchHighlights.addActionListener(e -> beforePreview.repaint());
         tileScope.add(showMatchHighlights);
-        tileScope.add(Box.createVerticalStrut(4));
 
         JLabel clickHelp = new JLabel("Current: A/Shift B \u00b7 Preview: B/Shift A");
         clickHelp.setToolTipText("Ctrl-click or right-click Current Map to include "
                 + "or exclude individual matches");
-        clickHelp.setAlignmentX(Component.LEFT_ALIGNMENT);
         tileScope.add(clickHelp);
         scopeCards.add(tileScope, "tiles");
 
-        JPanel heightScope = new JPanel();
-        heightScope.setLayout(new BoxLayout(heightScope, BoxLayout.Y_AXIS));
+        JPanel heightScope = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
         showHeightNumbers.setFocusable(false);
-        showHeightNumbers.setAlignmentX(Component.LEFT_ALIGNMENT);
         showHeightNumbers.setToolTipText(
                 "Overlay the Main UI height indicators for the yellow-selected layer");
         showHeightNumbers.addActionListener(e -> refreshPreview());
         updateHeightToggleLabel();
         heightScope.add(showHeightNumbers);
-        heightScope.add(Box.createVerticalStrut(5));
-        heightScope.add(createInfoText(
+        heightScope.add(new JLabel(
                 "Click a layer card to choose the yellow height-preview layer."));
         scopeCards.add(heightScope, "height");
 
-        JPanel copyScope = new JPanel();
-        copyScope.setLayout(new BoxLayout(copyScope, BoxLayout.Y_AXIS));
-        copyScope.add(createInfoText(
+        JPanel copyScope = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        copyScope.add(new JLabel(
                 "Copy uses the source and target layer selectors in the operation panel. "
                         + "The left layer checkboxes and tile-match exclusions do not apply."));
         scopeCards.add(copyScope, "copy");
 
-        JPanel clearScope = new JPanel();
-        clearScope.setLayout(new BoxLayout(clearScope, BoxLayout.Y_AXIS));
-        clearScope.add(createInfoText(
-                "Clear uses the selected matrix chunks and the checked layers on the left."));
+        JPanel clearScope = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        clearScope.add(new JLabel(
+                "Clear uses each selected chunk's independently checked layers."));
         scopeCards.add(clearScope, "clear");
 
-        scopeCards.setAlignmentX(Component.LEFT_ALIGNMENT);
-        scopeCards.setMaximumSize(new Dimension(Integer.MAX_VALUE, 120));
-        controls.add(scopeCards);
-        panel.add(controls, BorderLayout.NORTH);
-        panel.add(createSelectedChunksPanel(), BorderLayout.CENTER);
+        panel.add(scopeCards, BorderLayout.CENTER);
         return panel;
     }
 
@@ -671,15 +657,54 @@ public final class GlobalMapEditDialog extends JDialog {
         JPanel panel = new JPanel(new BorderLayout(4, 4));
         panel.setBorder(BorderFactory.createTitledBorder("Selected chunks"));
 
+        previewStats.setEditable(false);
+        previewStats.setOpaque(false);
+        previewStats.setLineWrap(true);
+        previewStats.setWrapStyleWord(true);
+        previewStats.setFont(UIManager.getFont("Label.font"));
+        previewStats.setBorder(new EmptyBorder(1, 4, 4, 4));
+        previewStats.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+        panel.add(previewStats, BorderLayout.NORTH);
+
         chunkScopeTable.setSelectionMode(
                 ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
         chunkScopeTable.setFillsViewportHeight(true);
         chunkScopeTable.setRowSelectionAllowed(true);
         chunkScopeTable.setColumnSelectionAllowed(false);
+        chunkScopeTable.setRowHeight(24);
+        chunkScopeTable.getTableHeader().setReorderingAllowed(false);
         chunkScopeTable.setToolTipText(
-                "Click a row to show that chunk; select rows and use Remove to unselect them");
-        chunkScopeTable.getColumnModel().getColumn(0).setPreferredWidth(78);
-        chunkScopeTable.getColumnModel().getColumn(0).setMaxWidth(92);
+                "Each row stores an independent L1-L9 edit scope for one selected chunk");
+        chunkScopeTable.getColumnModel().getColumn(0).setPreferredWidth(58);
+        chunkScopeTable.getColumnModel().getColumn(0).setMinWidth(52);
+        for (int column = 1; column <= MapGrid.numLayers; column++) {
+            chunkScopeTable.getColumnModel().getColumn(column).setPreferredWidth(29);
+            chunkScopeTable.getColumnModel().getColumn(column).setMinWidth(27);
+            chunkScopeTable.getColumnModel().getColumn(column).setMaxWidth(34);
+        }
+        int applyColumn = MapGrid.numLayers + 1;
+        int removeColumn = MapGrid.numLayers + 2;
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setPreferredWidth(52);
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setMinWidth(48);
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setMaxWidth(60);
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setPreferredWidth(32);
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setMinWidth(30);
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setMaxWidth(36);
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setCellRenderer(
+                new ChunkActionButtonRenderer("Apply", null,
+                        "Apply the current operation only to this chunk"));
+        chunkScopeTable.getColumnModel().getColumn(applyColumn).setCellEditor(
+                new ChunkActionButtonEditor("Apply", null,
+                        "Apply the current operation only to this chunk",
+                        this::applySelectedOperationToChunk));
+        Icon trashIcon = new TrashIcon();
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setCellRenderer(
+                new ChunkActionButtonRenderer("", trashIcon,
+                        "Remove this chunk from the editing scope"));
+        chunkScopeTable.getColumnModel().getColumn(removeColumn).setCellEditor(
+                new ChunkActionButtonEditor("", trashIcon,
+                        "Remove this chunk from the editing scope",
+                        this::removeSelectedChunk));
         chunkScopeTable.getSelectionModel().addListSelectionListener(event -> {
             if (event.getValueIsAdjusting() || updatingChunkScopeTable) {
                 return;
@@ -710,23 +735,56 @@ public final class GlobalMapEditDialog extends JDialog {
                 });
 
         JScrollPane scroll = new JScrollPane(chunkScopeTable);
-        scroll.setPreferredSize(new Dimension(360, 100));
-        scroll.setMinimumSize(new Dimension(280, 70));
+        scroll.setPreferredSize(new Dimension(410, 220));
+        scroll.setMinimumSize(new Dimension(330, 130));
         panel.add(scroll, BorderLayout.CENTER);
 
-        JPanel footer = new JPanel(new BorderLayout(5, 0));
         JLabel layerScope = new JLabel(
-                "Checked layers on the left apply to every listed chunk.");
+                "Select a row to edit its layers on the left. Apply All uses every row.");
         layerScope.setForeground(UIManager.getColor("Label.disabledForeground"));
         layerScope.setToolTipText(
-                "Layer scope remains global so Apply All behaves consistently");
-        footer.add(layerScope, BorderLayout.CENTER);
-        JButton remove = compactButton("Remove",
-                "Unselect the highlighted chunks from the matrix scope");
-        remove.addActionListener(e -> removeSelectedChunkRows());
-        footer.add(remove, BorderLayout.EAST);
-        panel.add(footer, BorderLayout.SOUTH);
+                "Checkboxes are stored independently for each selected matrix chunk");
+        panel.add(layerScope, BorderLayout.SOUTH);
         return panel;
+    }
+
+    private String chunkScopeTooltip(JTable table, MouseEvent event) {
+        int viewRow = table.rowAtPoint(event.getPoint());
+        int viewColumn = table.columnAtPoint(event.getPoint());
+        if (viewRow < 0 || viewColumn < 0) {
+            return "Each row stores an independent L1-L9 edit scope.";
+        }
+        int row = table.convertRowIndexToModel(viewRow);
+        int column = table.convertColumnIndexToModel(viewColumn);
+        Point point = chunkScopeModel.getPoint(row);
+        if (point == null) {
+            return null;
+        }
+        if (column == 0) {
+            return handler.getMapMatrix().getMapName(point)
+                    + " (" + point.x + ", " + point.y + ") \u2014 click to preview";
+        }
+        if (column <= MapGrid.numLayers) {
+            return "Layer " + column + " is "
+                    + (chunkLayerScopes.isSelected(point, column - 1)
+                    ? "included" : "excluded")
+                    + " for chunk (" + point.x + ", " + point.y + ")";
+        }
+        return column == MapGrid.numLayers + 1
+                ? "Apply the current operation only to this chunk"
+                : "Remove this chunk from the editing scope";
+    }
+
+    private void removeSelectedChunk(Point point) {
+        if (point == null) {
+            return;
+        }
+        Set<Point> selected = matrixSelection.getSelectedMaps();
+        if (selected.remove(point)) {
+            matrixSelection.setSelectedMaps(selected);
+            status.setText("Removed chunk (" + point.x + ", " + point.y
+                    + ") from the editing scope.");
+        }
     }
 
     private void removeSelectedChunkRows() {
@@ -775,6 +833,7 @@ public final class GlobalMapEditDialog extends JDialog {
         operations.setToolTipTextAt(3,
                 "Remove tile data and/or reset heights in checked layers.");
         panel.add(operations, BorderLayout.CENTER);
+        panel.add(createOperationScopeStrip(), BorderLayout.SOUTH);
         return panel;
     }
 
@@ -828,7 +887,7 @@ public final class GlobalMapEditDialog extends JDialog {
         collision.add(Box.createVerticalGlue());
 
         JPanel scope = createOptionGroup("Where it applies");
-        scope.add(createInfoText("Checked layers define which occurrences qualify.\n\n"
+        scope.add(createInfoText("Each selected chunk keeps its own checked layers.\n\n"
                 + "Replace and Delete match A. Swap matches both A and B.\n\n"
                 + "Ctrl/right-click Current Map to exclude individual matches."));
         return operationColumns(action, collision, scope);
@@ -905,9 +964,9 @@ public final class GlobalMapEditDialog extends JDialog {
         cells.add(Box.createVerticalGlue());
 
         JPanel scope = createOptionGroup("Maps and preview");
-        scope.add(createInfoText("Apply adjusts the map currently shown. Apply All adjusts every "
-                + "selected matrix chunk.\n\nHeight numbers show the yellow-selected layer on "
-                + "both maps; Preview Map displays the proposed new values."));
+        scope.add(createInfoText("Apply adjusts the map currently shown. Apply All uses "
+                + "each selected chunk's own checked layers.\n\nHeight numbers show the "
+                + "yellow-selected layer on both maps; Preview Map displays proposed values."));
         return operationColumns(adjustment, cells, scope);
     }
 
@@ -922,9 +981,9 @@ public final class GlobalMapEditDialog extends JDialog {
         data.add(Box.createVerticalGlue());
 
         JPanel layers = createOptionGroup("Layers and maps");
-        layers.add(createInfoText("The checked layer boxes define what can be cleared.\n\n"
-                + "Apply clears only the map currently shown. Apply All clears the checked "
-                + "layers in every selected matrix chunk."));
+        layers.add(createInfoText("Each selected chunk stores its own checked layers.\n\n"
+                + "Apply clears only the map currently shown. Apply All uses the "
+                + "independent layer choices shown in the chunk table."));
 
         JPanel safety = createOptionGroup("Safety");
         safety.add(createInfoText("A confirmation is required before anything is removed.\n\n"
@@ -971,11 +1030,13 @@ public final class GlobalMapEditDialog extends JDialog {
         JPanel buttons = new JPanel(new GridLayout(1, 5, 4, 0));
         JButton apply = new JButton("Apply");
         apply.setMargin(new Insets(2, 2, 2, 2));
-        apply.setToolTipText("Apply only to the map currently shown in the map viewport");
+        apply.setToolTipText(
+                "Apply to the currently shown selected chunk using that chunk's checked layers");
         apply.addActionListener(e -> applySelectedOperation(false));
         JButton applyAll = new JButton("Apply All");
         applyAll.setMargin(new Insets(2, 2, 2, 2));
-        applyAll.setToolTipText("Apply to every selected matrix chunk");
+        applyAll.setToolTipText(
+                "Apply to every selected chunk using each row's own checked layers");
         applyAll.addActionListener(e -> applySelectedOperation(true));
         JButton undo = new JButton("Undo");
         undo.setMargin(new Insets(2, 2, 2, 2));
@@ -1035,13 +1096,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 : operation == 1 ? "copy"
                 : operation == 2 ? "height" : "clear");
 
-        boolean usesCheckedLayers = operation != 1;
-        for (int layer = 0; layer < layerChecks.length; layer++) {
-            layerChecks[layer].setEnabled(usesCheckedLayers);
-            layerChecks[layer].setToolTipText(usesCheckedLayers
-                    ? "Include Layer " + (layer + 1) + " in this operation"
-                    : "Copy uses the source and target layer selectors; this checkbox is not used");
-        }
+        loadLayerChecksForPreviewMap();
+        chunkScopeModel.fireTableDataChanged();
         updateOperationHint();
         refreshPreview();
     }
@@ -1123,8 +1179,9 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private void showFindScopeMenu(Component invoker) {
         JPopupMenu menu = new JPopupMenu();
-        JMenuItem checked = new JMenuItem("Select chunks \u2014 checked layers");
-        checked.setToolTipText("Find tile A only in the currently checked layers");
+        JMenuItem checked = new JMenuItem("Select chunks \u2014 current chunk layers");
+        checked.setToolTipText(
+                "Find tile A using the checked layers of the currently selected chunk");
         checked.addActionListener(e -> selectChunksContainingSource(false));
         menu.add(checked);
 
@@ -1156,31 +1213,35 @@ public final class GlobalMapEditDialog extends JDialog {
         for (Map.Entry<Point, MapData> entry
                 : handler.getMapMatrix().getMatrix().entrySet()) {
             boolean mapMatched = false;
+            ArrayList<Integer> mapLayers = new ArrayList<>();
             for (int layer : layers) {
                 if (layerContains(entry.getValue().getGrid(), layer, sourceTileIndex)) {
                     matchingLayers[layer] = true;
+                    mapLayers.add(layer);
                     mapMatched = true;
                 }
             }
             if (mapMatched) {
-                matchingMaps.add(new Point(entry.getKey()));
+                Point point = new Point(entry.getKey());
+                matchingMaps.add(point);
+                int[] scope = scanAllLayers
+                        ? mapLayers.stream().mapToInt(Integer::intValue).toArray()
+                        : Arrays.copyOf(layers, layers.length);
+                chunkLayerScopes.setLayers(point, scope);
             }
         }
 
         if (matchingMaps.isEmpty()) {
             showValidation("Tile A was not found in the "
-                    + (scanAllLayers ? "matrix." : "currently checked layers."));
+                    + (scanAllLayers ? "matrix."
+                    : "current chunk's checked layers."));
             return;
-        }
-        if (scanAllLayers) {
-            for (int i = 0; i < layerChecks.length; i++) {
-                layerChecks[i].setSelected(matchingLayers[i]);
-            }
         }
         matrixSelection.setSelectedMaps(matchingMaps);
         status.setText("Found tile A in " + matchingMaps.size() + " chunk(s)"
                 + (scanAllLayers ? " across " + countTrue(matchingLayers)
-                + " matching layer(s)." : " within the checked layers."));
+                + " matching layer(s); each row keeps only its own matches."
+                : " within the selected chunk's checked layers."));
     }
 
     private static boolean layerContains(MapGrid grid, int layer, int tileIndex) {
@@ -1392,17 +1453,13 @@ public final class GlobalMapEditDialog extends JDialog {
             return;
         }
         Set<Point> maps = matrixSelection.getSelectedMaps();
-        int[] layers = selectedLayers();
-        if (layers.length == 0) {
-            layers = allLayers();
-        }
         LinkedHashSet<Integer> visible = new LinkedHashSet<>();
         for (Point point : maps) {
             MapData mapData = handler.getMapMatrix().getMap(point);
             if (mapData == null) {
                 continue;
             }
-            for (int layer : layers) {
+            for (int layer : layersForMap(point)) {
                 int[][] tiles = mapData.getGrid().tileLayers[layer];
                 for (int x = 0; x < MapGrid.cols; x++) {
                     for (int y = 0; y < MapGrid.rows; y++) {
@@ -1423,6 +1480,9 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private void matrixSelectionChanged(Point lastTouched) {
+        Set<Point> selectedMaps = matrixSelection.getSelectedMaps();
+        chunkLayerScopes.synchronize(selectedMaps);
+        excludedMatches.removeIf(cell -> !selectedMaps.contains(cell.getMap()));
         refreshMapChoices(lastTouched);
         refreshChunkScopeTable();
         refreshSourceFilter();
@@ -1434,15 +1494,18 @@ public final class GlobalMapEditDialog extends JDialog {
         if (point == null || !handler.getMapMatrix().getMatrix().containsKey(point)) {
             return;
         }
+        boolean selected = matrixSelection.getSelectedMaps().contains(point);
         previewMap = new Point(point);
-        previewOnlyMap = matrixSelection.getSelectedMaps().contains(point)
-                ? null : new Point(point);
+        previewOnlyMap = selected ? null : new Point(point);
         refreshMapChoices(null);
         matrixSelection.setPreviewMap(previewMap);
+        loadLayerChecksForPreviewMap();
         refreshLayerPreviews();
         refreshPreview();
-        status.setText("Previewing " + handler.getMapMatrix().getMapName(point)
-                + " without changing chunk selection.");
+        status.setText((selected ? "Editing selected chunk " : "Previewing ")
+                + handler.getMapMatrix().getMapName(point)
+                + " (" + point.x + ", " + point.y + ")"
+                + (selected ? "." : " without changing chunk selection."));
     }
 
     private void refreshMapChoices(Point preferred) {
@@ -1494,6 +1557,7 @@ public final class GlobalMapEditDialog extends JDialog {
             updatingPreviewMapChoice = false;
         }
         matrixSelection.setPreviewMap(previewMap);
+        loadLayerChecksForPreviewMap();
         refreshLayerPreviews();
     }
 
@@ -1517,18 +1581,22 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private void updatePreviewStats() {
         int tab = operations.getSelectedIndex();
-        int chunks = matrixSelection.getSelectedMaps().size();
+        Set<Point> selectedMaps = matrixSelection.getSelectedMaps();
+        int chunks = selectedMaps.size();
+        int scopedLayers = chunkLayerScopes.countSelectedLayers(selectedMaps);
+        String scopeSummary = "  \u00b7  Chunks " + chunks
+                + "  \u00b7  Checked layers " + scopedLayers;
         switch (tab) {
             case 0:
                 if (!isTileChoiceConfigured(sourceTileIndex)
                         || !isTileChoiceConfigured(replacementTileIndex)) {
-                    previewStats.setText("Choose A and B  \u00b7  Chunks " + chunks);
+                    previewStats.setText("Choose A and B" + scopeSummary);
                     break;
                 }
-                int[] counts = countReplaceMatches(matrixSelection.getSelectedMaps());
+                int[] counts = countReplaceMatches(selectedMaps);
                 previewStats.setText("Matches " + counts[0] + "  \u00b7  Included "
                         + counts[1] + "  \u00b7  Excluded " + (counts[0] - counts[1])
-                        + "  \u00b7  Chunks " + chunks);
+                        + scopeSummary);
                 break;
             case 1:
                 previewStats.setText("Copy L" + (copySourceLayer.getSelectedIndex() + 1)
@@ -1555,13 +1623,12 @@ public final class GlobalMapEditDialog extends JDialog {
         if (!isTileChoiceConfigured(sourceTileIndex)) {
             return new int[]{0, 0};
         }
-        int[] layers = selectedLayers();
         for (Point point : maps) {
             MapData data = handler.getMapMatrix().getMap(point);
             if (data == null) {
                 continue;
             }
-            for (int layer : layers) {
+            for (int layer : layersForMap(point)) {
                 int[][] tiles = data.getGrid().tileLayers[layer];
                 for (int x = 0; x < MapGrid.cols; x++) {
                     for (int y = 0; y < MapGrid.rows; y++) {
@@ -1596,7 +1663,7 @@ public final class GlobalMapEditDialog extends JDialog {
         if (data == null) {
             return matches;
         }
-        for (int layer : selectedLayers()) {
+        for (int layer : layersForMap(point)) {
             if (!previewLayerVisible[layer]) {
                 continue;
             }
@@ -1643,7 +1710,7 @@ public final class GlobalMapEditDialog extends JDialog {
                         || !isTileChoiceConfigured(replacementTileIndex)) {
                     return current;
                 }
-                if (!layerChecks[layer].isSelected() || isExcluded(map, layer, x, y)) {
+                if (!isLayerSelected(map, layer) || isExcluded(map, layer, x, y)) {
                     return current;
                 }
                 if (current == sourceTileIndex) {
@@ -1659,7 +1726,7 @@ public final class GlobalMapEditDialog extends JDialog {
                 }
                 return current;
             case 3:
-                if (clearTiles.isSelected() && layerChecks[layer].isSelected()) {
+                if (clearTiles.isSelected() && isLayerSelected(map, layer)) {
                     return -1;
                 }
                 return current;
@@ -1668,7 +1735,7 @@ public final class GlobalMapEditDialog extends JDialog {
         }
     }
 
-    private int previewHeightIndex(MapData data, int layer,
+    private int previewHeightIndex(MapData data, Point map, int layer,
                                    int x, int y, boolean after) {
         int current = data.getGrid().heightLayers[layer][x][y];
         if (!after) {
@@ -1683,7 +1750,7 @@ public final class GlobalMapEditDialog extends JDialog {
                 }
                 return current;
             case 2:
-                if (!layerChecks[layer].isSelected()
+                if (!isLayerSelected(map, layer)
                         || (occupiedOnly.isSelected()
                         && data.getGrid().tileLayers[layer][x][y] < 0)) {
                     return current;
@@ -1692,7 +1759,7 @@ public final class GlobalMapEditDialog extends JDialog {
                 return Math.max(MapEditorHandler.minHeight,
                         Math.min(MapEditorHandler.maxHeight, current + amount));
             case 3:
-                return clearHeights.isSelected() && layerChecks[layer].isSelected()
+                return clearHeights.isSelected() && isLayerSelected(map, layer)
                         ? 0 : current;
             default:
                 return current;
@@ -1715,7 +1782,7 @@ public final class GlobalMapEditDialog extends JDialog {
                         continue;
                     }
                     draws.add(new PreviewTile(layer, x, y,
-                            previewHeightIndex(data, layer, x, y, after), tileIndex));
+                            previewHeightIndex(data, map, layer, x, y, after), tileIndex));
                 }
             }
         }
@@ -1729,7 +1796,7 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private boolean isHeightAffected(MapData data, int layer, int x, int y) {
-        if (!layerChecks[layer].isSelected()) {
+        if (!isLayerSelected(previewMap, layer)) {
             return false;
         }
         int tab = operations.getSelectedIndex();
@@ -1755,8 +1822,8 @@ public final class GlobalMapEditDialog extends JDialog {
                         ? "Choose A and B"
                         : deleteMode.isSelected() ? "Delete A"
                         : swapTiles.isSelected() ? "Swap A \u2194 B" : "Replace A \u2192 B");
-                operationHint.setToolTipText("Apply changes the shown selected chunk; "
-                        + "Apply All changes every selected chunk. Heights stay unchanged.");
+                operationHint.setToolTipText("Apply uses the shown chunk's layers; "
+                        + "Apply All uses each selected row's own layers. Heights stay unchanged.");
                 break;
             case 1:
                 operationHint.setText("Copy one layer to another inside each chunk");
@@ -1765,8 +1832,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 break;
             case 2:
                 operationHint.setText("Adjust every applicable cell in checked layers");
-                operationHint.setToolTipText("Apply adjusts the shown chunk; Apply All adjusts "
-                        + "the checked layers of every selected chunk");
+                operationHint.setToolTipText("Apply adjusts the shown chunk; Apply All "
+                        + "uses each selected chunk's independently checked layers");
                 break;
             case 3:
                 operationHint.setText("Clear layers");
@@ -1788,8 +1855,8 @@ public final class GlobalMapEditDialog extends JDialog {
                         + "variant, exchanging two variants, or deleting one tile from the scope."
                         + "<br><br><b>Empty Tile:</b> use Empty as A to fill blank cells with B. "
                         + "Use Empty as B to delete A."
-                        + "<br><br><b>Scope:</b> chosen chunks, checked layers, and any individual "
-                        + "matches left included in Map Preview."
+                        + "<br><br><b>Scope:</b> each chosen chunk has its own checked layers. "
+                        + "Individual matches may also be excluded from Current Map."
                         + "<br><br><b>Safeguards:</b> heights never change. Existing collisions "
                         + "can be kept, or smart defaults can be recalculated for Replace/Swap. "
                         + "Delete leaves collision cells unchanged.";
@@ -1808,8 +1875,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 title = "Adjust Heights";
                 body = "<b>Useful for:</b> raising or lowering terrain after importing or copying "
                         + "sections, or correcting a consistent vertical offset."
-                        + "<br><br><b>Scope:</b> every applicable cell in every checked layer. "
-                        + "Apply affects the shown chunk; Apply All affects every selected chunk. "
+                        + "<br><br><b>Scope:</b> every applicable cell in each row's checked "
+                        + "layers. Apply affects the shown chunk; Apply All uses every row. "
                         + "The occupied-only option prevents empty cells from being altered."
                         + "<br><br><b>Safeguard:</b> results are clamped to PDSMS's supported range.";
                 break;
@@ -1817,8 +1884,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 title = "Clear";
                 body = "<b>Useful for:</b> removing accidental content from a layer, preparing "
                         + "layers for a new layout, or resetting unwanted height data."
-                        + "<br><br><b>Scope:</b> chosen chunks and checked layers; tiles and heights "
-                        + "are controlled separately."
+                        + "<br><br><b>Scope:</b> chosen chunks use their independent checked "
+                        + "layers; tiles and heights are controlled separately."
                         + "<br><br><b>Safeguards:</b> confirmation is required and Undo restores "
                         + "the complete multi-chunk change.";
                 break;
@@ -1845,26 +1912,43 @@ public final class GlobalMapEditDialog extends JDialog {
             maps = new LinkedHashSet<>();
             maps.add(new Point(previewMap));
         }
+        applySelectedOperationToMaps(maps);
+    }
 
+    private void applySelectedOperationToChunk(Point point) {
+        if (point == null || !matrixSelection.getSelectedMaps().contains(point)) {
+            showValidation("That chunk is no longer selected.");
+            return;
+        }
+        LinkedHashSet<Point> maps = new LinkedHashSet<>();
+        maps.add(new Point(point));
+        applySelectedOperationToMaps(maps);
+    }
+
+    private void applySelectedOperationToMaps(Set<Point> requestedMaps) {
         int tab = operations.getSelectedIndex();
-        int[] layers = selectedLayers();
-        if (tab != 1 && layers.length == 0) {
-            showValidation("Select at least one layer.");
+        LinkedHashSet<Point> maps = new LinkedHashSet<>();
+        int skippedChunks = 0;
+        for (Point point : requestedMaps) {
+            if (!matrixSelection.getSelectedMaps().contains(point)) {
+                continue;
+            }
+            if (tab != 1 && layersForMap(point).length == 0) {
+                skippedChunks++;
+                continue;
+            }
+            maps.add(new Point(point));
+        }
+        if (maps.isEmpty()) {
+            showValidation(tab == 1
+                    ? "Select at least one matrix chunk."
+                    : "Check at least one layer for the chunk(s) being applied.");
             return;
         }
         if (tab == 0 && handler.getTileset().size() == 0) {
             showValidation("Load a tileset before replacing tiles.");
             return;
         }
-
-        int[] snapshotLayers = tab == 1
-                ? new int[]{copyTargetLayer.getSelectedIndex()}
-                : layers;
-        String stateName = operationName(tab);
-        GlobalMapEditState before =
-                new GlobalMapEditState(stateName, handler, maps, snapshotLayers);
-        int changed;
-        int collisionChanges = 0;
 
         switch (tab) {
             case 0:
@@ -1896,24 +1980,6 @@ public final class GlobalMapEditDialog extends JDialog {
                     showValidation("No included tile matches remain in the chosen scope.");
                     return;
                 }
-                changed = deleteMode.isSelected()
-                        ? GlobalMapOperations.deleteTiles(
-                        handler.getMapMatrix().getMatrix(), maps, layers,
-                        sourceTileIndex, excludedMatches)
-                        : GlobalMapOperations.replaceTiles(
-                        handler.getMapMatrix().getMatrix(), maps, layers,
-                        sourceTileIndex, replacementTileIndex, swapTiles.isSelected(),
-                        excludedMatches);
-                if (changed > 0 && !deleteMode.isSelected()
-                        && refreshCollisionDefaults.isSelected()) {
-                    for (Point point : maps) {
-                        MapData mapData = handler.getMapMatrix().getMap(point);
-                        if (mapData != null) {
-                            collisionChanges += CollisionDefaultsApplier.apply(
-                                    handler.getTileset(), mapData.getGrid(), mapData.getCollisions());
-                        }
-                    }
-                }
                 break;
             case 1:
                 if (!copyTiles.isSelected() && !copyHeights.isSelected()) {
@@ -1924,10 +1990,6 @@ public final class GlobalMapEditDialog extends JDialog {
                     showValidation("Choose a different target layer.");
                     return;
                 }
-                changed = GlobalMapOperations.copyLayer(
-                        handler.getMapMatrix().getMatrix(), maps,
-                        copySourceLayer.getSelectedIndex(), copyTargetLayer.getSelectedIndex(),
-                        copyTiles.isSelected(), copyHeights.isSelected());
                 break;
             case 2:
                 int amount = (Integer) heightAmount.getValue();
@@ -1935,10 +1997,6 @@ public final class GlobalMapEditDialog extends JDialog {
                     showValidation("Choose a non-zero height adjustment.");
                     return;
                 }
-                changed = GlobalMapOperations.adjustHeights(
-                        handler.getMapMatrix().getMatrix(), maps, layers, amount,
-                        MapEditorHandler.minHeight, MapEditorHandler.maxHeight,
-                        occupiedOnly.isSelected());
                 break;
             case 3:
                 if (!clearTiles.isSelected() && !clearHeights.isSelected()) {
@@ -1952,12 +2010,68 @@ public final class GlobalMapEditDialog extends JDialog {
                 if (choice != JOptionPane.OK_OPTION) {
                     return;
                 }
-                changed = GlobalMapOperations.clearLayers(
-                        handler.getMapMatrix().getMatrix(), maps, layers,
-                        clearTiles.isSelected(), clearHeights.isSelected());
                 break;
             default:
                 return;
+        }
+
+        int[] snapshotLayers = tab == 1
+                ? new int[]{copyTargetLayer.getSelectedIndex()}
+                : chunkLayerScopes.getLayerUnion(maps).stream()
+                .mapToInt(Integer::intValue).toArray();
+        String stateName = operationName(tab);
+        GlobalMapEditState before =
+                new GlobalMapEditState(stateName, handler, maps, snapshotLayers);
+        int changed = 0;
+        int collisionChanges = 0;
+        for (Point point : maps) {
+            LinkedHashSet<Point> oneMap = new LinkedHashSet<>();
+            oneMap.add(new Point(point));
+            int mapChanged;
+            switch (tab) {
+                case 0:
+                    mapChanged = deleteMode.isSelected()
+                            ? GlobalMapOperations.deleteTiles(
+                            handler.getMapMatrix().getMatrix(), oneMap,
+                            layersForMap(point), sourceTileIndex, excludedMatches)
+                            : GlobalMapOperations.replaceTiles(
+                            handler.getMapMatrix().getMatrix(), oneMap,
+                            layersForMap(point), sourceTileIndex, replacementTileIndex,
+                            swapTiles.isSelected(), excludedMatches);
+                    if (mapChanged > 0 && !deleteMode.isSelected()
+                            && refreshCollisionDefaults.isSelected()) {
+                        MapData mapData = handler.getMapMatrix().getMap(point);
+                        if (mapData != null) {
+                            collisionChanges += CollisionDefaultsApplier.apply(
+                                    handler.getTileset(), mapData.getGrid(),
+                                    mapData.getCollisions());
+                        }
+                    }
+                    break;
+                case 1:
+                    mapChanged = GlobalMapOperations.copyLayer(
+                            handler.getMapMatrix().getMatrix(), oneMap,
+                            copySourceLayer.getSelectedIndex(),
+                            copyTargetLayer.getSelectedIndex(),
+                            copyTiles.isSelected(), copyHeights.isSelected());
+                    break;
+                case 2:
+                    mapChanged = GlobalMapOperations.adjustHeights(
+                            handler.getMapMatrix().getMatrix(), oneMap,
+                            layersForMap(point), (Integer) heightAmount.getValue(),
+                            MapEditorHandler.minHeight, MapEditorHandler.maxHeight,
+                            occupiedOnly.isSelected());
+                    break;
+                case 3:
+                    mapChanged = GlobalMapOperations.clearLayers(
+                            handler.getMapMatrix().getMatrix(), oneMap,
+                            layersForMap(point), clearTiles.isSelected(),
+                            clearHeights.isSelected());
+                    break;
+                default:
+                    mapChanged = 0;
+            }
+            changed += mapChanged;
         }
 
         if (changed == 0 && collisionChanges == 0) {
@@ -1971,7 +2085,9 @@ public final class GlobalMapEditDialog extends JDialog {
         status.setText(stateName + ": changed " + changed + " cell(s) in "
                 + maps.size() + " chunk(s)"
                 + (collisionChanges > 0
-                ? " and refreshed " + collisionChanges + " collision cell(s)." : "."));
+                ? " and refreshed " + collisionChanges + " collision cell(s)." : ".")
+                + (skippedChunks > 0 ? " Skipped " + skippedChunks
+                + " chunk(s) with no checked layers." : ""));
     }
 
     private void refreshMaps(Set<Point> maps, int[] layers) {
@@ -1998,6 +2114,7 @@ public final class GlobalMapEditDialog extends JDialog {
     private void refreshWorkspaceVisuals() {
         refreshLayerPreviews();
         matrixSelection.updateBounds();
+        chunkLayerScopes.synchronize(matrixSelection.getSelectedMaps());
         matrixSelection.revalidate();
         matrixSelection.repaint();
         refreshMapChoices(null);
@@ -2035,20 +2152,41 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private int[] selectedLayers() {
-        int count = 0;
-        for (JCheckBox check : layerChecks) {
-            if (check.isSelected()) {
-                count++;
+        return layersForMap(previewMap);
+    }
+
+    private int[] layersForMap(Point point) {
+        return chunkLayerScopes.getLayers(point);
+    }
+
+    private boolean isLayerSelected(Point point, int layer) {
+        return chunkLayerScopes.isSelected(point, layer);
+    }
+
+    private void loadLayerChecksForPreviewMap() {
+        boolean selectedChunk = previewMap != null
+                && chunkLayerScopes.contains(previewMap);
+        boolean usesCheckedLayers = operations.getSelectedIndex() != 1;
+        updatingLayerChecks = true;
+        try {
+            for (int layer = 0; layer < layerChecks.length; layer++) {
+                layerChecks[layer].setSelected(selectedChunk
+                        && isLayerSelected(previewMap, layer));
+                layerChecks[layer].setEnabled(selectedChunk && usesCheckedLayers);
+                layerChecks[layer].setToolTipText(!selectedChunk
+                        ? "Select this previewed chunk before assigning edit layers"
+                        : usesCheckedLayers
+                        ? "Include Layer " + (layer + 1) + " for chunk ("
+                        + previewMap.x + ", " + previewMap.y + ")"
+                        : "Copy uses its source and target selectors; row layer checks are not used");
             }
+        } finally {
+            updatingLayerChecks = false;
         }
-        int[] layers = new int[count];
-        int next = 0;
-        for (int i = 0; i < layerChecks.length; i++) {
-            if (layerChecks[i].isSelected()) {
-                layers[next++] = i;
-            }
+        if (checkAllLayersButton != null) {
+            checkAllLayersButton.setEnabled(selectedChunk && usesCheckedLayers);
+            uncheckAllLayersButton.setEnabled(selectedChunk && usesCheckedLayers);
         }
-        return layers;
     }
 
     private static int[] allLayers() {
@@ -2060,9 +2198,14 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private void setAllLayers(boolean selected) {
-        for (JCheckBox check : layerChecks) {
-            check.setSelected(selected);
+        if (previewMap == null || !chunkLayerScopes.contains(previewMap)) {
+            showValidation("Select a chunk before changing its layer scope.");
+            return;
         }
+        chunkLayerScopes.setAll(previewMap, selected);
+        loadLayerChecksForPreviewMap();
+        chunkScopeModel.fireLayerRowChanged(previewMap);
+        refreshSourceFilter();
         refreshPreview();
     }
 
@@ -2104,11 +2247,6 @@ public final class GlobalMapEditDialog extends JDialog {
     private void updateHeightToggleLabel() {
         showHeightNumbers.setText("Height numbers (L"
                 + (selectedPreviewLayer + 1) + ")");
-    }
-
-    private void selectCurrentLayer() {
-        setAllLayers(false);
-        layerChecks[handler.getActiveLayerIndex()].setSelected(true);
     }
 
     private void showValidation(String message) {
@@ -2579,7 +2717,8 @@ public final class GlobalMapEditDialog extends JDialog {
                         RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
                 for (int x = 0; x < MapGrid.cols; x++) {
                     for (int y = 0; y < MapGrid.rows; y++) {
-                        int height = previewHeightIndex(data, layer, x, y, after);
+                        int height = previewHeightIndex(
+                                data, previewMap, layer, x, y, after);
                         BufferedImage indicator = handler.getHeightImageByValue(height);
                         Rectangle cell = cellBounds(x, y);
                         graphics.drawImage(indicator, cell.x, cell.y,
@@ -2867,6 +3006,20 @@ public final class GlobalMapEditDialog extends JDialog {
             return points.indexOf(point);
         }
 
+        private void fireLayerChanged(Point point, int layer) {
+            int row = indexOf(point);
+            if (row >= 0) {
+                fireTableCellUpdated(row, layer + 1);
+            }
+        }
+
+        private void fireLayerRowChanged(Point point) {
+            int row = indexOf(point);
+            if (row >= 0) {
+                fireTableRowsUpdated(row, row);
+            }
+        }
+
         @Override
         public int getRowCount() {
             return points.size();
@@ -2874,20 +3027,148 @@ public final class GlobalMapEditDialog extends JDialog {
 
         @Override
         public int getColumnCount() {
-            return 2;
+            return MapGrid.numLayers + 3;
         }
 
         @Override
         public String getColumnName(int column) {
-            return column == 0 ? "Chunk" : "Map";
+            if (column == 0) {
+                return "Chunk";
+            }
+            if (column <= MapGrid.numLayers) {
+                return "L" + column;
+            }
+            return column == MapGrid.numLayers + 1 ? "Apply" : "";
+        }
+
+        @Override
+        public Class<?> getColumnClass(int column) {
+            return column >= 1 && column <= MapGrid.numLayers
+                    ? Boolean.class : String.class;
+        }
+
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            if (column >= 1 && column <= MapGrid.numLayers) {
+                return operations.getSelectedIndex() != 1;
+            }
+            return column > MapGrid.numLayers;
         }
 
         @Override
         public Object getValueAt(int row, int column) {
             Point point = points.get(row);
-            return column == 0
-                    ? "(" + point.x + ", " + point.y + ")"
-                    : handler.getMapMatrix().getMapName(point);
+            if (column == 0) {
+                return "(" + point.x + ", " + point.y + ")";
+            }
+            if (column <= MapGrid.numLayers) {
+                return chunkLayerScopes.isSelected(point, column - 1);
+            }
+            return column == MapGrid.numLayers + 1 ? "Apply" : "";
+        }
+
+        @Override
+        public void setValueAt(Object value, int row, int column) {
+            if (column < 1 || column > MapGrid.numLayers
+                    || !(value instanceof Boolean)) {
+                return;
+            }
+            Point point = points.get(row);
+            chunkLayerScopes.setSelected(point, column - 1, (Boolean) value);
+            fireTableCellUpdated(row, column);
+            if (point.equals(previewMap)) {
+                loadLayerChecksForPreviewMap();
+                refreshSourceFilter();
+                refreshPreview();
+            } else {
+                updatePreviewStats();
+            }
+        }
+    }
+
+    private static final class ChunkActionButtonRenderer extends JButton
+            implements TableCellRenderer {
+
+        private ChunkActionButtonRenderer(String text, Icon icon, String tooltip) {
+            super(text, icon);
+            setFocusable(false);
+            setMargin(new Insets(1, 2, 1, 2));
+            setToolTipText(tooltip);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(
+                JTable table, Object value, boolean selected, boolean focused,
+                int row, int column) {
+            setEnabled(table.isEnabled());
+            return this;
+        }
+    }
+
+    private final class ChunkActionButtonEditor extends AbstractCellEditor
+            implements TableCellEditor {
+
+        private final JButton button;
+        private final Consumer<Point> action;
+        private Point point;
+
+        private ChunkActionButtonEditor(String text, Icon icon, String tooltip,
+                                        Consumer<Point> action) {
+            this.action = action;
+            button = new JButton(text, icon);
+            button.setFocusable(false);
+            button.setMargin(new Insets(1, 2, 1, 2));
+            button.setToolTipText(tooltip);
+            button.addActionListener(event -> {
+                Point target = point == null ? null : new Point(point);
+                fireEditingStopped();
+                if (target != null) {
+                    action.accept(target);
+                }
+            });
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(
+                JTable table, Object value, boolean selected, int row, int column) {
+            point = chunkScopeModel.getPoint(table.convertRowIndexToModel(row));
+            return button;
+        }
+
+        @Override
+        public Object getCellEditorValue() {
+            return null;
+        }
+    }
+
+    private static final class TrashIcon implements Icon {
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D g2 = (Graphics2D) graphics.create();
+            try {
+                Color foreground = UIManager.getColor("Button.foreground");
+                g2.setColor(foreground == null ? Color.LIGHT_GRAY : foreground);
+                g2.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND));
+                g2.drawLine(x + 4, y + 4, x + 12, y + 4);
+                g2.drawLine(x + 6, y + 2, x + 10, y + 2);
+                g2.drawRoundRect(x + 5, y + 5, 6, 8, 1, 1);
+                g2.drawLine(x + 7, y + 7, x + 7, y + 11);
+                g2.drawLine(x + 9, y + 7, x + 9, y + 11);
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 16;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 16;
         }
     }
 
