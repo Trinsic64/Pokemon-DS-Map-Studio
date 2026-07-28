@@ -46,8 +46,9 @@ Each row represents exactly one selected Matrix chunk.
 
 The keyboard `Delete` key can remove selected table rows.
 
-Newly selected chunks begin with the layer that was active in the main PDSMS
-editor checked. This conservative default avoids silently editing all layers.
+Newly selected chunks begin with every edit layer unchecked. Selecting a chunk
+therefore opens it for viewing first; the user must explicitly check the layers
+that the operation may change.
 
 For operations that use checked layers, a chunk with no checked layers is
 skipped by **Apply All**. If no requested chunk has a checked layer, nothing is
@@ -64,6 +65,8 @@ Selected Chunks table.
   never changes edit scope or exported map data.
 - **Yellow card outline:** chooses the layer used by the height-number preview.
 - **View All:** shows all layers in map height order.
+- **Hide All:** hides all layers in both map previews without changing any
+  L1–L9 edit checkbox.
 - **Check All / Uncheck:** changes every L1–L9 edit checkbox for the currently
   shown selected chunk only.
 
@@ -112,6 +115,8 @@ unselected tile blocks Apply; Empty Tile is an explicit editable value.
 - **Show matches** controls the faint persistent match highlight.
 - **Reset** removes individual match exclusions.
 - Eye visibility affects both previews, but not edit scope.
+- Preview compositing follows the main map renderer's effective tile height,
+  tile X/Y/Z offsets, and equal-depth layer precedence.
 
 ## Apply, Undo, and Save
 

@@ -23,4 +23,13 @@ class GlobalMapEditDialogTest {
 
         assertTrue(comparison < 0);
     }
+
+    @Test
+    void layerPrecedenceWinsBeforeRowOrderAtEqualDepth() {
+        int comparison = GlobalMapEditDialog.comparePreviewDrawOrder(
+                3, 2, 8, 4,
+                3, 20, 1, 4);
+
+        assertTrue(comparison < 0);
+    }
 }

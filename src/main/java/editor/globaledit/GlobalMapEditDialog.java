@@ -49,17 +49,17 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     static int comparePreviewDrawOrder(
-            int leftHeight, int leftY, int leftLayer, int leftX,
-            int rightHeight, int rightY, int rightLayer, int rightX) {
-        int comparison = Integer.compare(leftHeight, rightHeight);
-        if (comparison != 0) {
-            return comparison;
-        }
-        comparison = Integer.compare(rightY, leftY);
+            float leftDepth, int leftY, int leftLayer, int leftX,
+            float rightDepth, int rightY, int rightLayer, int rightX) {
+        int comparison = Float.compare(leftDepth, rightDepth);
         if (comparison != 0) {
             return comparison;
         }
         comparison = Integer.compare(rightLayer, leftLayer);
+        if (comparison != 0) {
+            return comparison;
+        }
+        comparison = Integer.compare(rightY, leftY);
         if (comparison != 0) {
             return comparison;
         }
@@ -139,8 +139,7 @@ public final class GlobalMapEditDialog extends JDialog {
         this.handler = handler;
         Arrays.fill(previewLayerVisible, true);
         selectedPreviewLayer = handler.getActiveLayerIndex();
-        this.chunkLayerScopes =
-                new ChunkLayerScopes(handler.getActiveLayerIndex());
+        this.chunkLayerScopes = new ChunkLayerScopes();
         this.matrixSelection =
                 new MatrixSelectionPanel(handler, this::matrixSelectionChanged,
                         this::previewMatrixChunk);
@@ -242,6 +241,9 @@ public final class GlobalMapEditDialog extends JDialog {
         JPanel buttons = new JPanel(new GridLayout(0, 1, 0, 3));
         JButton viewAll = compactButton("View All", "Show every layer in map height order");
         viewAll.addActionListener(e -> setAllPreviewLayersVisible(true));
+        JButton hideAll = compactButton("Hide All",
+                "Hide every layer in Current Map and Preview Map without changing edit scope");
+        hideAll.addActionListener(e -> setAllPreviewLayersVisible(false));
         checkAllLayersButton = compactButton("Check All",
                 "Include every layer for the selected chunk");
         checkAllLayersButton.addActionListener(e -> setAllLayers(true));
@@ -249,6 +251,7 @@ public final class GlobalMapEditDialog extends JDialog {
                 "Remove every layer from the selected chunk");
         uncheckAllLayersButton.addActionListener(e -> setAllLayers(false));
         buttons.add(viewAll);
+        buttons.add(hideAll);
         buttons.add(checkAllLayersButton);
         buttons.add(uncheckAllLayersButton);
         panel.add(buttons, BorderLayout.SOUTH);
@@ -1782,18 +1785,45 @@ public final class GlobalMapEditDialog extends JDialog {
                     if (tileIndex < 0 || tileIndex >= handler.getTileset().size()) {
                         continue;
                     }
+                    Tile tile = handler.getTileset().get(tileIndex);
+                    float depth = previewHeightIndex(
+                            data, map, layer, x, y, after);
+                    if (handler.useRealTimePostProcessing()) {
+                        depth += tile.getZOffset();
+                    }
                     draws.add(new PreviewTile(layer, x, y,
-                            previewHeightIndex(data, map, layer, x, y, after), tileIndex));
+                            depth, tileIndex));
                 }
             }
         }
-        //The Main UI renders layers from low to high with GL_LESS. At equal
-        //depth the first (lower-numbered) layer remains visible, so paint
-        //higher layers first and lower layers last in Java2D.
+        //The Main UI resolves effective Z depth first. With GL_LESS, an equal
+        //depth pixel from a later layer does not replace a lower-numbered
+        //layer that was drawn first. Java2D therefore paints higher layers
+        //first and lower layers last before using row order as a final tie.
         draws.sort((left, right) -> comparePreviewDrawOrder(
-                left.height, left.y, left.layer, left.x,
-                right.height, right.y, right.layer, right.x));
+                left.depth, left.y, left.layer, left.x,
+                right.depth, right.y, right.layer, right.x));
         return draws;
+    }
+
+    private int previewTileDrawX(PreviewTile draw, Tile tile, int tileSize) {
+        return tileDrawX(draw.x, tile, tileSize);
+    }
+
+    private int previewTileDrawY(PreviewTile draw, Tile tile, int tileSize) {
+        return tileDrawY(draw.y, tile, tileSize);
+    }
+
+    private int tileDrawX(int x, Tile tile, int tileSize) {
+        int offset = handler.useRealTimePostProcessing()
+                ? Math.round(tile.getXOffset() * tileSize) : 0;
+        return x * tileSize + offset;
+    }
+
+    private int tileDrawY(int y, Tile tile, int tileSize) {
+        int offset = handler.useRealTimePostProcessing()
+                ? Math.round(tile.getYOffset() * tileSize) : 0;
+        return (MapGrid.rows - y - tile.getHeight()) * tileSize - offset;
     }
 
     private boolean isHeightAffected(MapData data, int layer, int x, int y) {
@@ -2361,14 +2391,14 @@ public final class GlobalMapEditDialog extends JDialog {
         private final int layer;
         private final int x;
         private final int y;
-        private final int height;
+        private final float depth;
         private final int tileIndex;
 
-        private PreviewTile(int layer, int x, int y, int height, int tileIndex) {
+        private PreviewTile(int layer, int x, int y, float depth, int tileIndex) {
             this.layer = layer;
             this.x = x;
             this.y = y;
-            this.height = height;
+            this.depth = depth;
             this.tileIndex = tileIndex;
         }
     }
@@ -2494,9 +2524,11 @@ public final class GlobalMapEditDialog extends JDialog {
                     BufferedImage tile =
                             handler.getTileset().get(draw.tileIndex).getSmallThumbnail();
                     if (tile != null) {
-                        graphics.drawImage(tile, draw.x * 2,
-                                (MapGrid.rows - draw.y - 1) * 2
-                                        - (tile.getHeight() - 2), null);
+                        Tile tileDefinition =
+                                handler.getTileset().get(draw.tileIndex);
+                        graphics.drawImage(tile,
+                                previewTileDrawX(draw, tileDefinition, 2),
+                                previewTileDrawY(draw, tileDefinition, 2), null);
                     }
                 }
             } finally {
@@ -2691,9 +2723,9 @@ public final class GlobalMapEditDialog extends JDialog {
                     Tile tile = handler.getTileset().get(draw.tileIndex);
                     BufferedImage thumbnail = tile.getThumbnail();
                     if (thumbnail != null) {
-                        graphics.drawImage(thumbnail, draw.x * tileSize,
-                                (MapGrid.rows - draw.y - 1
-                                        - (tile.getHeight() - 1)) * tileSize, null);
+                        graphics.drawImage(thumbnail,
+                                previewTileDrawX(draw, tile, tileSize),
+                                previewTileDrawY(draw, tile, tileSize), null);
                     }
                 }
             } finally {
@@ -2854,8 +2886,8 @@ public final class GlobalMapEditDialog extends JDialog {
 
         private Rectangle tileBounds(int x, int y, Tile tile) {
             int nativeSize = MapGrid.cols * 16;
-            int nativeX = x * 16;
-            int nativeY = (MapGrid.rows - y - tile.getHeight()) * 16;
+            int nativeX = tileDrawX(x, tile, 16);
+            int nativeY = tileDrawY(y, tile, 16);
             int nativeRight = nativeX + tile.getWidth() * 16;
             int nativeBottom = nativeY + tile.getHeight() * 16;
             int x1 = mapBounds.x + nativeX * mapBounds.width / nativeSize;
@@ -2913,9 +2945,8 @@ public final class GlobalMapEditDialog extends JDialog {
                 if (image == null) {
                     continue;
                 }
-                int drawX = draw.x * 16;
-                int drawY = (MapGrid.rows - draw.y - 1
-                        - (tile.getHeight() - 1)) * 16;
+                int drawX = previewTileDrawX(draw, tile, 16);
+                int drawY = previewTileDrawY(draw, tile, 16);
                 int localX = nativeX - drawX;
                 int localY = nativeY - drawY;
                 if (localX >= 0 && localY >= 0

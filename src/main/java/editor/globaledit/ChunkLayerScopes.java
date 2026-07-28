@@ -13,12 +13,9 @@ import java.util.Set;
  */
 final class ChunkLayerScopes {
 
-    private final int defaultLayer;
     private final Map<Point, boolean[]> scopes = new LinkedHashMap<>();
 
-    ChunkLayerScopes(int defaultLayer) {
-        this.defaultLayer = Math.max(0,
-                Math.min(defaultLayer, MapGrid.numLayers - 1));
+    ChunkLayerScopes() {
     }
 
     void synchronize(Set<Point> selectedMaps) {
@@ -110,9 +107,7 @@ final class ChunkLayerScopes {
     }
 
     private boolean[] defaultScope() {
-        boolean[] scope = new boolean[MapGrid.numLayers];
-        scope[defaultLayer] = true;
-        return scope;
+        return new boolean[MapGrid.numLayers];
     }
 
     private static boolean validLayer(int layer) {

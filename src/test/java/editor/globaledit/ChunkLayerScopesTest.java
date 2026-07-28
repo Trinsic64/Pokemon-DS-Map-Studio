@@ -14,18 +14,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ChunkLayerScopesTest {
 
     @Test
-    void newChunksStartWithOnlyTheMainEditorLayerSelected() {
-        ChunkLayerScopes scopes = new ChunkLayerScopes(3);
+    void newChunksStartWithNoEditLayersSelected() {
+        ChunkLayerScopes scopes = new ChunkLayerScopes();
         Point first = new Point(2, 8);
 
         scopes.synchronize(Set.of(first));
 
-        assertArrayEquals(new int[]{3}, scopes.getLayers(first));
+        assertArrayEquals(new int[0], scopes.getLayers(first));
     }
 
     @Test
     void chunksKeepIndependentLayerSelections() {
-        ChunkLayerScopes scopes = new ChunkLayerScopes(0);
+        ChunkLayerScopes scopes = new ChunkLayerScopes();
         Point first = new Point(2, 8);
         Point second = new Point(3, 8);
         scopes.synchronize(new LinkedHashSet<>(Set.of(first, second)));
@@ -44,7 +44,7 @@ class ChunkLayerScopesTest {
 
     @Test
     void deselectedChunksAreRemovedFromTheScopeModel() {
-        ChunkLayerScopes scopes = new ChunkLayerScopes(0);
+        ChunkLayerScopes scopes = new ChunkLayerScopes();
         Point first = new Point(2, 8);
         Point second = new Point(3, 8);
         scopes.synchronize(new LinkedHashSet<>(Set.of(first, second)));
