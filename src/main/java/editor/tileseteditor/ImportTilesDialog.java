@@ -61,6 +61,10 @@ public class ImportTilesDialog extends JDialog {
     }
 
     public void init(Tileset tileset) {
+        init(tileset, false);
+    }
+
+    public void init(Tileset tileset, boolean selectAll) {
         this.tileset = tileset;
 
         TilesetRenderer tr = new TilesetRenderer(tileset);
@@ -72,6 +76,10 @@ public class ImportTilesDialog extends JDialog {
         tr.destroy();
 
         tileMultiSelector.init(tileset);
+        if (selectAll) {
+            tileMultiSelector.selectAll();
+            tileMultiSelector.repaint();
+        }
     }
 
     public int getReturnValue() {

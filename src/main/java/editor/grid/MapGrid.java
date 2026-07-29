@@ -347,7 +347,20 @@ public class MapGrid {
     }
 
     public void floodFillHeightGrid(int x, int y, int value) {
-        Utils.floodFillMatrix(heightLayers[handler.getActiveLayerIndex()], x, y, value);
+        floodFillHeightGrid(x, y, value, null);
+    }
+
+    public void floodFillHeightGrid(int x, int y, int value, boolean[][] restrictMask) {
+        if (restrictMask == null) {
+            Utils.floodFillMatrix(heightLayers[handler.getActiveLayerIndex()], x, y, value);
+            return;
+        }
+        boolean[][] mask = new boolean[MapGrid.cols][MapGrid.rows];
+        for (int i = 0; i < MapGrid.cols; i++) {
+            System.arraycopy(restrictMask[i], 0, mask[i], 0, MapGrid.rows);
+        }
+        Utils.floodFillMatrix(
+                heightLayers[handler.getActiveLayerIndex()], mask, x, y, value, 1, 1);
     }
 
     /*

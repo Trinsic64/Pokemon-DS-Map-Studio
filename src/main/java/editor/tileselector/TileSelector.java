@@ -7,6 +7,7 @@ import javax.swing.GroupLayout;
 import editor.handler.MapEditorHandler;
 import editor.mapdisplay.MapDisplay;
 import editor.mapdisplay.ViewMode;
+import editor.tileseteditor.ImportTilesDialog;
 import editor.tileseteditor.TilesetEditorDialog;
 import formats.collisions.CollisionTypes;
 
@@ -25,6 +26,7 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -49,6 +51,8 @@ public class TileSelector extends JPanel {
     private final int headerHeight = 16;
     private static final int PINNED_DIVIDER_HEIGHT = 5;
     private static final int MIN_PINNED_BODY_HEIGHT = 32;
+    private static final Color TILE_TRANSPARENCY_BACKDROP = new Color(96, 96, 96);
+    private static final Color TILE_TRANSPARENCY_OUTLINE = new Color(124, 124, 124);
     private int rows;
     private ArrayList<Rectangle> boundingBoxes = new ArrayList<>();
     private BufferedImage display;
@@ -92,6 +96,7 @@ public class TileSelector extends JPanel {
     private int pinnedResizeStartY;
     private int pinnedResizeStartHeight;
     private boolean readOnlySelectionMode;
+    private boolean showTileTransparencyBackdrop = true;
     private int readOnlySelectedIndex;
     private IntConsumer readOnlySelectionListener = index -> { };
     private Runnable readOnlyLayoutListener = () -> { };
@@ -598,6 +603,8 @@ public class TileSelector extends JPanel {
     public void init(MapEditorHandler handler, TilesetEditorDialog dialog) {
         this.handler = handler;
         this.multiSelectionEnabled = true;
+        this.readOnlySelectionMode = false;
+        this.showTileTransparencyBackdrop = true;
         this.dialog = dialog;
 
         updateLayout();
@@ -607,6 +614,7 @@ public class TileSelector extends JPanel {
         this.handler = handler;
         this.multiSelectionEnabled = false;
         this.readOnlySelectionMode = false;
+        this.showTileTransparencyBackdrop = true;
         this.readOnlyVisibleIndices = null;
 
         updateLayout();
@@ -617,6 +625,7 @@ public class TileSelector extends JPanel {
         this.handler = handler;
         this.multiSelectionEnabled = false;
         this.readOnlySelectionMode = true;
+        this.showTileTransparencyBackdrop = false;
         this.readOnlyVisibleIndices = null;
         this.readOnlySelectedIndex =
                 selectedIndex < 0 ? -1 : clampTileIndex(selectedIndex);
@@ -981,10 +990,23 @@ public class TileSelector extends JPanel {
         }
 
         for (Placement placement : placements) {
-            g.drawImage(getDisplayThumbnail(handler.getTileset().get(placement.tileIndex), placement.section),
-                    placement.bounds.x, placement.bounds.y, null);
+            paintTileThumbnail(g, placement,
+                    handler.getTileset().get(placement.tileIndex));
         }
         g.dispose();
+    }
+
+    private void paintTileThumbnail(Graphics2D g, Placement placement, Tile tile) {
+        Rectangle bounds = placement.bounds;
+        if (showTileTransparencyBackdrop) {
+            g.setColor(TILE_TRANSPARENCY_BACKDROP);
+            g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            g.setColor(TILE_TRANSPARENCY_OUTLINE);
+            g.drawRect(bounds.x, bounds.y,
+                    Math.max(0, bounds.width - 1), Math.max(0, bounds.height - 1));
+        }
+        g.drawImage(getDisplayThumbnail(tile, placement.section),
+                bounds.x, bounds.y, null);
     }
 
     private void paintSectionHeader(Graphics2D g, Section section) {
@@ -1060,8 +1082,8 @@ public class TileSelector extends JPanel {
             }
             for (Placement placement : placements) {
                 if (placement.section == section) {
-                    body.drawImage(getDisplayThumbnail(handler.getTileset().get(placement.tileIndex), placement.section),
-                            placement.bounds.x, placement.bounds.y, null);
+                    paintTileThumbnail(body, placement,
+                            handler.getTileset().get(placement.tileIndex));
                 }
             }
             paintPinnedSelectionOverlays(body, section);
@@ -1172,14 +1194,14 @@ public class TileSelector extends JPanel {
     }
 
     public void updateTile(int index) {
-        Graphics g = display.getGraphics();
+        Graphics2D g = (Graphics2D) display.getGraphics();
         Tile tile = handler.getTileset().get(index);
         for (Placement placement : placements) {
             if (placement.tileIndex == index) {
-                g.drawImage(getDisplayThumbnail(tile, placement.section),
-                        placement.bounds.x, placement.bounds.y, null);
+                paintTileThumbnail(g, placement, tile);
             }
         }
+        g.dispose();
     }
 
     public void updateTiles(ArrayList<Integer> indices) {
@@ -2123,8 +2145,31 @@ public class TileSelector extends JPanel {
             return;
         }
         try {
-            int added = PaletteFolderBundleIO.read(chooser.getSelectedFile(), handler.getTileset());
+            File bundle = chooser.getSelectedFile();
+            Tileset preview = PaletteFolderBundleIO.preview(bundle);
+            ImportTilesDialog selectionDialog =
+                    new ImportTilesDialog(SwingUtilities.getWindowAncestor(this));
+            selectionDialog.init(preview, true);
+            selectionDialog.setLocationRelativeTo(getDialogParent());
+            selectionDialog.setVisible(true);
+            if (selectionDialog.getReturnValue() != ImportTilesDialog.APPROVE_OPTION) {
+                return;
+            }
+            Set<Integer> selectedIndices = new HashSet<>();
+            for (Tile tile : selectionDialog.getTilesSelected()) {
+                selectedIndices.add(preview.getTiles().indexOf(tile));
+            }
+
+            int added = PaletteFolderBundleIO.read(
+                    bundle, handler.getTileset(), selectedIndices);
             handler.getMainFrame().renderTilesetThumbnails();
+            //Folder imports can add materials after MapDisplay created its GL
+            //texture list. Refresh both live displays now; opening the Tile
+            //Editor should not be required to make imported tiles usable.
+            handler.getMainFrame().getMapDisplay().requestUpdate();
+            handler.getMainFrame().getMapDisplay().repaint();
+            handler.getMainFrame().getTileDisplay().requestUpdate();
+            handler.getMainFrame().repaintTileDisplay();
             updateLayout();
             repaint();
             handler.getMainFrame().updateTileSelectorLayout();
@@ -2132,7 +2177,9 @@ public class TileSelector extends JPanel {
                 dialog.updateViewTileIndex();
             }
             JOptionPane.showMessageDialog(getDialogParent(),
-                    "Folder imported. " + added + " new tile(s) were added; matching tiles were reused.",
+                    "Folder imported. " + selectedIndices.size() + " tile(s) selected; "
+                            + added + " new tile(s) were added and "
+                            + (selectedIndices.size() - added) + " matching tile(s) were reused.",
                     "Import Palette Folder", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(getDialogParent(),

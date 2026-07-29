@@ -14,6 +14,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -44,6 +45,35 @@ public final class PaletteFolderBundleIO {
     }
 
     public static int read(File input, Tileset target) throws Exception {
+        return read(input, target, null);
+    }
+
+    /**
+     * Reads the bundle's tiles for display in an import-selection dialog.
+     * Texture images are held by the returned tileset after the temporary
+     * extraction directory has been removed.
+     */
+    public static Tileset preview(File input) throws Exception {
+        Path temp = Files.createTempDirectory("pdsms-folder-import-");
+        try {
+            unzip(input.toPath(), temp);
+            Path tilesetPath = temp.resolve(TILESET_NAME);
+            Path rootPath = temp.resolve(ROOT_NAME);
+            if (!Files.isRegularFile(tilesetPath) || !Files.isRegularFile(rootPath)) {
+                throw new IOException("This is not a valid PDSMS folder bundle.");
+            }
+            return TilesetIO.readTilesetFromFile(tilesetPath.toString());
+        } finally {
+            deleteTree(temp);
+        }
+    }
+
+    /**
+     * Imports only the selected source tile indices. A null selection imports
+     * every tile for compatibility with callers that do not need a chooser.
+     */
+    public static int read(File input, Tileset target, Set<Integer> selectedIndices)
+            throws Exception {
         Path temp = Files.createTempDirectory("pdsms-folder-import-");
         try {
             unzip(input.toPath(), temp);
@@ -60,6 +90,9 @@ public final class PaletteFolderBundleIO {
             int added = 0;
             Map<Integer, Integer> importedTileIndices = new HashMap<>();
             for (int sourceIndex = 0; sourceIndex < imported.size(); sourceIndex++) {
+                if (selectedIndices != null && !selectedIndices.contains(sourceIndex)) {
+                    continue;
+                }
                 Tile sourceTile = imported.get(sourceIndex);
                 int existingIndex = target.indexOfTileVisualData(sourceTile);
                 Tile targetTile;
@@ -82,6 +115,9 @@ public final class PaletteFolderBundleIO {
                 }
             }
             for (SmartGrid sourceGrid : imported.getSmartGridArray()) {
+                if (!canImportSmartGrid(sourceGrid, selectedIndices)) {
+                    continue;
+                }
                 int[][] mapped = new int[SmartGrid.width][SmartGrid.height];
                 for (int x = 0; x < SmartGrid.width; x++) {
                     for (int y = 0; y < SmartGrid.height; y++) {
@@ -105,6 +141,21 @@ public final class PaletteFolderBundleIO {
         } finally {
             deleteTree(temp);
         }
+    }
+
+    private static boolean canImportSmartGrid(SmartGrid grid, Set<Integer> selectedIndices) {
+        if (selectedIndices == null) {
+            return true;
+        }
+        for (int x = 0; x < SmartGrid.width; x++) {
+            for (int y = 0; y < SmartGrid.height; y++) {
+                int index = grid.sgrid[x][y];
+                if (index >= 0 && !selectedIndices.contains(index)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static Tileset createSubset(Tileset source, PaletteFolder root) {

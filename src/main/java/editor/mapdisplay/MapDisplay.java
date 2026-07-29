@@ -250,6 +250,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     //Region selection (select / lasso / wand / move tools)
     protected MapSelection selection = null;
     protected boolean pasting = false;
+    protected boolean pasteWithSecondaryData = false;
 
     //Rectangle selection drag / resize state
     protected Point selDragStart = null;
@@ -296,7 +297,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     //Marching ants animation for the selection outline
     private float antsPhase = 0;
     private final javax.swing.Timer antsTimer = new javax.swing.Timer(75, e -> {
-        if (hasSelection() && isOrthoView() && isShowing()) {
+        if (hasSelection() && isGridEditingView() && isShowing()) {
             antsPhase = (antsPhase + 1) % 8;
             repaint();
         }
@@ -510,7 +511,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                 repaint();
                 break;
             case KeyEvent.VK_M:
-                if (isOrthoView()) {
+                if (isGridEditingView()) {
                     toggleSelectMode();
                     repaint();
                 }
@@ -519,7 +520,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                 SHIFT_PRESSED = true;
                 //Temporary rectangle selection: show the select tool cursor
                 //(the wand keeps its own cursor; Shift there selects matching)
-                if (isOrthoView() && editMode != EditMode.MODE_SELECT_WAND) {
+                if (isGridEditingView() && editMode != EditMode.MODE_SELECT_WAND) {
                     setCursor(EditMode.MODE_SELECT.cursor);
                 }
                 repaint();
@@ -1439,22 +1440,22 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         }
     }
 
-    /**
-     * Middle click flood fills only act inside the current selection;
-     * clicking an unselected cell does nothing.
-     */
-    private boolean isInsideSelectionOnSelectedMap(Point p) {
-        return hasSelection() && selection.getMapCoords().equals(handler.getMapSelected())
-                && selection.contains(p.x, p.y);
+    private boolean[][] getFloodFillRestriction(Point p) {
+        if (hasSelection() && selection.getMapCoords().equals(handler.getMapSelected())
+                && selection.contains(p.x, p.y)) {
+            return selection.getMask();
+        }
+        return null;
     }
 
     protected void floodFillClearTileInGrid(MouseEvent e) {
         if (handler.getTileset().size() > 0) {
             Point p = getCoordsInSelectedMap(e);
-            if (isPointInsideGrid(p.x, p.y) && handler.getActiveTileLayer()[p.x][p.y] != -1
-                    && isInsideSelectionOnSelectedMap(p)) {
+            if (isPointInsideGrid(p.x, p.y)
+                    && handler.getActiveTileLayer()[p.x][p.y] != -1) {
                 handler.addMapState(new MapLayerState("Flood Fill Clear Tile", handler));
-                handler.getGrid().floodFillTileGrid(p.x, p.y, -1, 1, 1, selection.getMask());
+                handler.getGrid().floodFillTileGrid(
+                        p.x, p.y, -1, 1, 1, getFloodFillRestriction(p));
                 //updateMapThumbnail(e);
             }
         }
@@ -1463,12 +1464,13 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     protected void floodFillTileInGrid(MouseEvent e) {
         if (handler.getTileset().size() > 0) {
             Point p = getCoordsInSelectedMap(e);
-            if (isPointInsideGrid(p.x, p.y) && handler.getActiveTileLayer()[p.x][p.y] != handler.getTileIndexSelected()
-                    && isInsideSelectionOnSelectedMap(p)) {
+            if (isPointInsideGrid(p.x, p.y)
+                    && handler.getActiveTileLayer()[p.x][p.y]
+                    != handler.getTileIndexSelected()) {
                 handler.addMapState(new MapLayerState("Flood Fill Tile", handler));
                 Tile tile = handler.getTileSelected();
                 handler.getGrid().floodFillTileGrid(p.x, p.y, handler.getTileIndexSelected(),
-                        tile.getWidth(), tile.getHeight(), selection.getMask());
+                        tile.getWidth(), tile.getHeight(), getFloodFillRestriction(p));
                 applyAutoCollision(handler.getMapSelected());
                 //updateMapThumbnail(e);
             }
@@ -1479,7 +1481,8 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         if (handler.getTileset().size() > 0) {
             Point p = getCoordsInSelectedMap(e);
             if (isPointInsideGrid(p.x, p.y) && handler.getActiveHeightLayer()[p.x][p.y] != handler.getHeightSelected()) {
-                handler.getGrid().floodFillHeightGrid(p.x, p.y, handler.getHeightSelected());
+                handler.getGrid().floodFillHeightGrid(
+                        p.x, p.y, handler.getHeightSelected(), getFloodFillRestriction(p));
                 //updateMapThumbnail(e);
             }
         }
@@ -1590,6 +1593,14 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         return viewMode.getViewID() == ViewMode.ViewID.VIEW_ORTHO;
     }
 
+    public boolean isHeightView() {
+        return viewMode.getViewID() == ViewMode.ViewID.VIEW_HEIGHT;
+    }
+
+    public boolean isGridEditingView() {
+        return isOrthoView() || isHeightView();
+    }
+
     public void clearSelection() {
         selection = null;
         selDragStart = null;
@@ -1608,6 +1619,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
             cancelFloatingMove();
         }
         pasting = false;
+        pasteWithSecondaryData = false;
         clearSelection();
         repaint();
     }
@@ -1792,14 +1804,16 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     protected void wandSelect(MouseEvent e, boolean global) {
         Point map = getMapCoords(e);
         Point cell = getCoordsInMap(e, map);
-        int[][] tileLayer = handler.getMapMatrix().getMapAndCreate(map)
-                .getGrid().tileLayers[handler.getActiveLayerIndex()];
+        MapGrid grid = handler.getMapMatrix().getMapAndCreate(map).getGrid();
+        int[][] activeData = isHeightView()
+                ? grid.heightLayers[handler.getActiveLayerIndex()]
+                : grid.tileLayers[handler.getActiveLayerIndex()];
         boolean[][] region;
-        if (canUseSmartTools()) {
-            region = MapSelection.computeWandRegion(tileLayer, cell.x, cell.y, !global,
+        if (isOrthoView() && canUseSmartTools()) {
+            region = MapSelection.computeWandRegion(activeData, cell.x, cell.y, !global,
                     handler.getSmartGridSelected().getTileIndices());
         } else {
-            region = MapSelection.computeWandRegion(tileLayer, cell.x, cell.y, !global);
+            region = MapSelection.computeWandRegion(activeData, cell.x, cell.y, !global);
         }
 
         boolean combine = (e.isControlDown() || global)
@@ -1845,7 +1859,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     }
 
     public void selectAllInSelectedMap() {
-        if (!isOrthoView()) {
+        if (!isGridEditingView()) {
             return;
         }
         setEditMode(EditMode.MODE_SELECT);
@@ -1859,20 +1873,34 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     /* -------------------- Copy / cut / delete / fill -------------------- */
 
     public boolean copySelection() {
+        return copySelection(false);
+    }
+
+    public boolean copySelectionWithSecondaryData() {
+        return copySelection(true);
+    }
+
+    private boolean copySelection(boolean includeSecondaryData) {
         if (!hasSelection()) {
             return false;
         }
         Rectangle r = getSelectionBounds();
         MapGrid grid = handler.getMapMatrix().getMapAndCreate(selection.getMapCoords()).getGrid();
         int layer = handler.getActiveLayerIndex();
-        int[][] tiles = new int[r.width][r.height];
-        int[][] heights = new int[r.width][r.height];
+        boolean copyTiles = isOrthoView() || includeSecondaryData;
+        boolean copyHeights = isHeightView() || includeSecondaryData;
+        int[][] tiles = copyTiles ? new int[r.width][r.height] : null;
+        int[][] heights = copyHeights ? new int[r.width][r.height] : null;
         boolean[][] mask = new boolean[r.width][r.height];
         boolean[][] selMask = selection.getMask();
         for (int i = 0; i < r.width; i++) {
             for (int j = 0; j < r.height; j++) {
-                tiles[i][j] = grid.tileLayers[layer][r.x + i][r.y + j];
-                heights[i][j] = grid.heightLayers[layer][r.x + i][r.y + j];
+                if (tiles != null) {
+                    tiles[i][j] = grid.tileLayers[layer][r.x + i][r.y + j];
+                }
+                if (heights != null) {
+                    heights[i][j] = grid.heightLayers[layer][r.x + i][r.y + j];
+                }
                 mask[i][j] = selMask[r.x + i][r.y + j];
             }
         }
@@ -1896,26 +1924,48 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
             return;
         }
         handler.addMapState(new MapLayerState(stateName, handler));
-        clearSelectedCells();
+        clearSelectedCells(isOrthoView(), isHeightView());
         refreshMapLayer(selection.getMapCoords());
     }
 
-    private void clearSelectedCells() {
+    private void clearSelectedCells(boolean clearTiles, boolean clearHeights) {
         MapGrid grid = handler.getMapMatrix().getMapAndCreate(selection.getMapCoords()).getGrid();
         int layer = handler.getActiveLayerIndex();
         boolean[][] selMask = selection.getMask();
         for (int i = 0; i < cols; i++) {
             for (int j = 0; j < rows; j++) {
                 if (selMask[i][j]) {
-                    grid.tileLayers[layer][i][j] = -1;
-                    grid.heightLayers[layer][i][j] = 0;
+                    if (clearTiles) {
+                        grid.tileLayers[layer][i][j] = -1;
+                    }
+                    if (clearHeights) {
+                        grid.heightLayers[layer][i][j] = 0;
+                    }
                 }
             }
         }
     }
 
     public void fillSelection() {
-        if (!hasSelection() || handler.getTileset().size() == 0) {
+        if (!hasSelection()) {
+            return;
+        }
+        if (isHeightView()) {
+            handler.addMapState(new MapLayerState("Fill Selection with Height", handler));
+            MapGrid grid = handler.getMapMatrix().getMapAndCreate(selection.getMapCoords()).getGrid();
+            int[][] heightLayer = grid.heightLayers[handler.getActiveLayerIndex()];
+            boolean[][] selMask = selection.getMask();
+            for (int i = 0; i < cols; i++) {
+                for (int j = 0; j < rows; j++) {
+                    if (selMask[i][j]) {
+                        heightLayer[i][j] = handler.getHeightSelected();
+                    }
+                }
+            }
+            refreshMapLayer(selection.getMapCoords());
+            return;
+        }
+        if (handler.getTileset().size() == 0) {
             return;
         }
         handler.addMapState(new MapLayerState("Fill Selection", handler));
@@ -1941,10 +1991,19 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     /* -------------------- Paste (stamp) -------------------- */
 
     public void startPaste() {
-        if (!handler.hasRegionClipboard() || !isOrthoView()) {
+        startPaste(false);
+    }
+
+    public void startPasteWithSecondaryData() {
+        startPaste(true);
+    }
+
+    private void startPaste(boolean includeSecondaryData) {
+        if (!isGridEditingView() || !hasCompatibleRegionClipboard(includeSecondaryData)) {
             return;
         }
         pasting = true;
+        pasteWithSecondaryData = includeSecondaryData;
         if (editMode != EditMode.MODE_SELECT) {
             setEditMode(EditMode.MODE_SELECT);
         }
@@ -1954,27 +2013,45 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
     public void cancelPaste() {
         pasting = false;
+        pasteWithSecondaryData = false;
         repaint();
     }
 
+    public boolean hasCompatibleRegionClipboard(boolean includeSecondaryData) {
+        if (includeSecondaryData) {
+            return handler.hasCompleteRegionClipboard();
+        }
+        return isHeightView()
+                ? handler.hasHeightRegionClipboard()
+                : isOrthoView() && handler.hasTileRegionClipboard();
+    }
+
     protected void commitPaste(MouseEvent e) {
-        if (!pasting || !handler.hasRegionClipboard()) {
+        if (!pasting || !hasCompatibleRegionClipboard(pasteWithSecondaryData)) {
             return;
         }
-        int[][] tiles = handler.getTileRegionClipboard();
-        int[][] heights = handler.getHeightRegionClipboard();
+        int[][] tiles = isOrthoView() || pasteWithSecondaryData
+                ? handler.getTileRegionClipboard() : null;
+        int[][] heights = isHeightView() || pasteWithSecondaryData
+                ? handler.getHeightRegionClipboard() : null;
         boolean[][] mask = handler.getRegionClipboardMask();
 
         setMapSelected(e);
         updateMousePostion(e);
         Point anchor = getGlobalCellFromMouse(); //Top-left cell of the pasted region (global coords)
 
-        handler.addMapState(new MapLayerState("Paste Selection", handler));
+        handler.addMapState(new MapLayerState(
+                pasteWithSecondaryData ? "Paste Selection with Tiles and Heights"
+                        : isHeightView() ? "Paste Height Selection" : "Paste Tile Selection",
+                handler));
         Set<Point> touched = writeRegionGlobal(anchor.x, anchor.y, tiles, heights, mask);
-        applyAutoCollision(touched);
+        if (tiles != null) {
+            applyAutoCollision(touched);
+        }
         setSelectionFromGlobalRegion(anchor.x, anchor.y, mask);
         refreshMaps(touched);
         pasting = false;
+        pasteWithSecondaryData = false;
         notifySelectionChanged();
     }
 
@@ -2008,18 +2085,22 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
         handler.addMapState(new MapLayerState("Move Selection", handler));
 
-        floatTiles = new int[r.width][r.height];
-        floatHeights = new int[r.width][r.height];
+        floatTiles = isOrthoView() ? new int[r.width][r.height] : null;
+        floatHeights = isHeightView() ? new int[r.width][r.height] : null;
         floatMask = new boolean[r.width][r.height];
         boolean[][] selMask = selection.getMask();
         for (int i = 0; i < r.width; i++) {
             for (int j = 0; j < r.height; j++) {
-                floatTiles[i][j] = grid.tileLayers[layer][r.x + i][r.y + j];
-                floatHeights[i][j] = grid.heightLayers[layer][r.x + i][r.y + j];
+                if (floatTiles != null) {
+                    floatTiles[i][j] = grid.tileLayers[layer][r.x + i][r.y + j];
+                }
+                if (floatHeights != null) {
+                    floatHeights[i][j] = grid.heightLayers[layer][r.x + i][r.y + j];
+                }
                 floatMask[i][j] = selMask[r.x + i][r.y + j];
             }
         }
-        clearSelectedCells();
+        clearSelectedCells(floatTiles != null, floatHeights != null);
 
         int topY = r.y + r.height - 1;
         Point cell = getCoordsInMap(e, selection.getMapCoords());
@@ -2097,8 +2178,8 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         int w = r.width;
         int h = r.height;
 
-        int[][] tiles = new int[w][h];
-        int[][] heights = new int[w][h];
+        int[][] tiles = isOrthoView() ? new int[w][h] : null;
+        int[][] heights = isHeightView() ? new int[w][h] : null;
         boolean[][] mask = new boolean[w][h];
         boolean[][] smartMask = new boolean[w][h];
         boolean[][] selMask = selection.getMask();
@@ -2107,21 +2188,26 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                 : java.util.Collections.emptySet();
         for (int i = 0; i < w; i++) {
             for (int j = 0; j < h; j++) {
-                tiles[i][j] = grid.tileLayers[layer][r.x + i][r.y + j];
-                heights[i][j] = grid.heightLayers[layer][r.x + i][r.y + j];
+                if (tiles != null) {
+                    tiles[i][j] = grid.tileLayers[layer][r.x + i][r.y + j];
+                }
+                if (heights != null) {
+                    heights[i][j] = grid.heightLayers[layer][r.x + i][r.y + j];
+                }
                 mask[i][j] = selMask[r.x + i][r.y + j];
-                smartMask[i][j] = mask[i][j] && smartTileIndices.contains(tiles[i][j]);
+                smartMask[i][j] = tiles != null && mask[i][j]
+                        && smartTileIndices.contains(tiles[i][j]);
             }
         }
 
         String[] names = {"Rotate Selection", "Flip Selection", "Flip Selection"};
         handler.addMapState(new MapLayerState(names[op], handler));
-        clearSelectedCells();
+        clearSelectedCells(tiles != null, heights != null);
 
         int nw = op == 0 ? h : w;
         int nh = op == 0 ? w : h;
-        int[][] newTiles = new int[nw][nh];
-        int[][] newHeights = new int[nw][nh];
+        int[][] newTiles = tiles == null ? null : new int[nw][nh];
+        int[][] newHeights = heights == null ? null : new int[nw][nh];
         boolean[][] newMask = new boolean[nw][nh];
         boolean[][] newSmartMask = new boolean[nw][nh];
         for (int i = 0; i < w; i++) {
@@ -2137,8 +2223,12 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                     ni = i;
                     nj = h - 1 - j;
                 }
-                newTiles[ni][nj] = tiles[i][j];
-                newHeights[ni][nj] = heights[i][j];
+                if (newTiles != null) {
+                    newTiles[ni][nj] = tiles[i][j];
+                }
+                if (newHeights != null) {
+                    newHeights[ni][nj] = heights[i][j];
+                }
                 newMask[ni][nj] = mask[i][j];
                 newSmartMask[ni][nj] = smartMask[i][j];
             }
@@ -2177,9 +2267,9 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     }
 
     /**
-     * Writes a region (tiles + heights in grid row order, j = 0 bottom row)
-     * into the world at the given global position. Cells outside the mask are
-     * skipped. Returns the set of map coords that were modified.
+     * Writes the non-null parts of a region (grid row order, j = 0 bottom
+     * row) into the world at the given global position. Cells outside the mask
+     * are skipped. Returns the set of map coords that were modified.
      *
      * @param leftGlobalX global column of the left edge
      * @param topGlobalY  global row (downwards) of the top edge
@@ -2187,8 +2277,10 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     protected Set<Point> writeRegionGlobal(int leftGlobalX, int topGlobalY,
                                            int[][] tiles, int[][] heights, boolean[][] mask) {
         Set<Point> touched = new HashSet<>();
-        int w = tiles.length;
-        int h = tiles[0].length;
+        int w = mask != null ? mask.length
+                : tiles != null ? tiles.length : heights.length;
+        int h = mask != null ? mask[0].length
+                : tiles != null ? tiles[0].length : heights[0].length;
         int layer = handler.getActiveLayerIndex();
         for (int i = 0; i < w; i++) {
             for (int j = 0; j < h; j++) {
@@ -2201,8 +2293,12 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                 int cx = gx - map.x * cols;
                 int cy = rows - 1 - (gyDown - map.y * rows);
                 MapGrid grid = handler.getMapMatrix().getMapAndCreate(map).getGrid();
-                grid.tileLayers[layer][cx][cy] = tiles[i][j];
-                grid.heightLayers[layer][cx][cy] = heights[i][j];
+                if (tiles != null) {
+                    grid.tileLayers[layer][cx][cy] = tiles[i][j];
+                }
+                if (heights != null) {
+                    grid.heightLayers[layer][cx][cy] = heights[i][j];
+                }
                 touched.add(map);
             }
         }
@@ -2683,20 +2779,31 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     }
 
     protected void drawPastePreview(Graphics g) {
-        if (!pasting || !handler.hasRegionClipboard() || handler.getTileset().size() == 0) {
+        if (!pasting || !hasCompatibleRegionClipboard(pasteWithSecondaryData)) {
             return;
         }
-        drawRegionPreview(g, handler.getTileRegionClipboard(), handler.getRegionClipboardMask(),
-                Math.floorDiv(xMouse, tileSize), Math.floorDiv(yMouse, tileSize));
+        int ax = Math.floorDiv(xMouse, tileSize);
+        int ay = Math.floorDiv(yMouse, tileSize);
+        if (isHeightView()) {
+            drawHeightRegionPreview(g, handler.getHeightRegionClipboard(),
+                    handler.getRegionClipboardMask(), ax, ay);
+        } else if (handler.getTileset().size() > 0) {
+            drawRegionPreview(g, handler.getTileRegionClipboard(),
+                    handler.getRegionClipboardMask(), ax, ay);
+        }
     }
 
     protected void drawFloatingMovePreview(Graphics g) {
-        if (!floatingMove || floatTiles == null) {
+        if (!floatingMove || (floatTiles == null && floatHeights == null)) {
             return;
         }
         int ax = Math.floorDiv(xMouse, tileSize) - floatGrabOffset.x;
         int ay = Math.floorDiv(yMouse, tileSize) - floatGrabOffset.y;
-        drawRegionPreview(g, floatTiles, floatMask, ax, ay);
+        if (floatHeights != null) {
+            drawHeightRegionPreview(g, floatHeights, floatMask, ax, ay);
+        } else {
+            drawRegionPreview(g, floatTiles, floatMask, ax, ay);
+        }
     }
 
     /**
@@ -2722,6 +2829,28 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
                     int y = (ay + (h - 1 - j) - (tile.getHeight() - 1)) * tileSize;
                     g.drawImage(tile.getThumbnail(), x, y, null);
                 }
+            }
+        }
+        g2d.setComposite(oldComposite);
+        g2d.setColor(Color.orange);
+        g2d.drawRect(ax * tileSize, ay * tileSize, w * tileSize, h * tileSize);
+    }
+
+    protected void drawHeightRegionPreview(Graphics g, int[][] heights,
+                                           boolean[][] mask, int ax, int ay) {
+        int w = heights.length;
+        int h = heights[0].length;
+        Graphics2D g2d = (Graphics2D) g;
+        java.awt.Composite oldComposite = g2d.getComposite();
+        g2d.setComposite(AlphaComposite.SrcOver.derive(0.75f));
+        for (int i = 0; i < w; i++) {
+            for (int j = 0; j < h; j++) {
+                if (mask != null && !mask[i][j]) {
+                    continue;
+                }
+                g.drawImage(handler.getHeightImageByValue(heights[i][j]),
+                        (ax + i) * tileSize,
+                        (ay + (h - 1 - j)) * tileSize, null);
             }
         }
         g2d.setComposite(oldComposite);
@@ -2816,79 +2945,81 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
     /* -------------------- Context menu / mode helpers -------------------- */
 
     protected void showSelectionPopup(MouseEvent e) {
-        if (selectionPopupMenu == null) {
-            selectionPopupMenu = new javax.swing.JPopupMenu();
-
-            javax.swing.JMenuItem miMove = new javax.swing.JMenuItem("Move Selection");
-            miMove.setName("selectionItem");
-            miMove.addActionListener(evt -> {
-                setEditMode(EditMode.MODE_MOVE_SELECT);
-                handler.getMainFrame().getJtbModeMoveSelect().setSelected(true);
-            });
-            selectionPopupMenu.add(miMove);
-            selectionPopupMenu.addSeparator();
-
-            javax.swing.JMenuItem miRotate = new javax.swing.JMenuItem("Rotate 90\u00b0 Clockwise");
-            miRotate.setName("selectionItem");
-            miRotate.addActionListener(evt -> rotateSelection90());
-            selectionPopupMenu.add(miRotate);
-
-            javax.swing.JMenuItem miFlipH = new javax.swing.JMenuItem("Flip Horizontal");
-            miFlipH.setName("selectionItem");
-            miFlipH.addActionListener(evt -> flipSelectionHorizontal());
-            selectionPopupMenu.add(miFlipH);
-
-            javax.swing.JMenuItem miFlipV = new javax.swing.JMenuItem("Flip Vertical");
-            miFlipV.setName("selectionItem");
-            miFlipV.addActionListener(evt -> flipSelectionVertical());
-            selectionPopupMenu.add(miFlipV);
-            selectionPopupMenu.addSeparator();
-
-            javax.swing.JMenuItem miCut = new javax.swing.JMenuItem("Cut");
-            miCut.setName("selectionItem");
-            miCut.addActionListener(evt -> cutSelection());
-            selectionPopupMenu.add(miCut);
-
-            javax.swing.JMenuItem miCopy = new javax.swing.JMenuItem("Copy");
-            miCopy.setName("selectionItem");
-            miCopy.addActionListener(evt -> copySelection());
-            selectionPopupMenu.add(miCopy);
-
-            javax.swing.JMenuItem miPaste = new javax.swing.JMenuItem("Paste");
-            miPaste.setName("pasteItem");
-            miPaste.addActionListener(evt -> startPaste());
-            selectionPopupMenu.add(miPaste);
-
-            javax.swing.JMenuItem miDelete = new javax.swing.JMenuItem("Delete");
-            miDelete.setName("selectionItem");
-            miDelete.addActionListener(evt -> deleteSelection());
-            selectionPopupMenu.add(miDelete);
-
-            javax.swing.JMenuItem miFill = new javax.swing.JMenuItem("Fill with Selected Tile");
-            miFill.setName("selectionItem");
-            miFill.addActionListener(evt -> fillSelection());
-            selectionPopupMenu.add(miFill);
-            selectionPopupMenu.addSeparator();
-
-            //No name on purpose: Deselect stays enabled whenever the menu is
-            //shown, even when the cursor is outside the selection
-            javax.swing.JMenuItem miDeselect = new javax.swing.JMenuItem("Deselect");
-            miDeselect.addActionListener(evt -> deselect());
-            selectionPopupMenu.add(miDeselect);
-        }
-
         boolean selectionActions = isCursorInsideSelection(e);
-        for (java.awt.Component c : selectionPopupMenu.getComponents()) {
-            if (!(c instanceof javax.swing.JMenuItem)) {
-                continue;
-            }
-            javax.swing.JMenuItem item = (javax.swing.JMenuItem) c;
-            if ("pasteItem".equals(item.getName())) {
-                item.setEnabled(handler.hasRegionClipboard());
-            } else if ("selectionItem".equals(item.getName())) {
-                item.setEnabled(selectionActions);
-            }
-        }
+        selectionPopupMenu = new javax.swing.JPopupMenu();
+
+        javax.swing.JMenuItem miMove = new javax.swing.JMenuItem("Move Selection");
+        miMove.setEnabled(selectionActions);
+        miMove.addActionListener(evt -> {
+            setEditMode(EditMode.MODE_MOVE_SELECT);
+            handler.getMainFrame().getJtbModeMoveSelect().setSelected(true);
+        });
+        selectionPopupMenu.add(miMove);
+        selectionPopupMenu.addSeparator();
+
+        javax.swing.JMenuItem miRotate = new javax.swing.JMenuItem("Rotate 90\u00b0 Clockwise");
+        miRotate.setEnabled(selectionActions);
+        miRotate.addActionListener(evt -> rotateSelection90());
+        selectionPopupMenu.add(miRotate);
+
+        javax.swing.JMenuItem miFlipH = new javax.swing.JMenuItem("Flip Horizontal");
+        miFlipH.setEnabled(selectionActions);
+        miFlipH.addActionListener(evt -> flipSelectionHorizontal());
+        selectionPopupMenu.add(miFlipH);
+
+        javax.swing.JMenuItem miFlipV = new javax.swing.JMenuItem("Flip Vertical");
+        miFlipV.setEnabled(selectionActions);
+        miFlipV.addActionListener(evt -> flipSelectionVertical());
+        selectionPopupMenu.add(miFlipV);
+        selectionPopupMenu.addSeparator();
+
+        javax.swing.JMenuItem miCut = new javax.swing.JMenuItem("Cut");
+        miCut.setEnabled(selectionActions);
+        miCut.addActionListener(evt -> cutSelection());
+        selectionPopupMenu.add(miCut);
+
+        javax.swing.JMenuItem miCopy = new javax.swing.JMenuItem("Copy");
+        miCopy.setEnabled(selectionActions);
+        miCopy.addActionListener(evt -> copySelection());
+        selectionPopupMenu.add(miCopy);
+
+        javax.swing.JMenu specialCopy = new javax.swing.JMenu("Special Copy");
+        specialCopy.setEnabled(selectionActions);
+        javax.swing.JMenuItem miCopyBoth = new javax.swing.JMenuItem(
+                isHeightView() ? "Copy with Tiles" : "Copy with Heights");
+        miCopyBoth.addActionListener(evt -> copySelectionWithSecondaryData());
+        specialCopy.add(miCopyBoth);
+        selectionPopupMenu.add(specialCopy);
+
+        javax.swing.JMenuItem miPaste = new javax.swing.JMenuItem("Paste");
+        miPaste.setEnabled(hasCompatibleRegionClipboard(false));
+        miPaste.addActionListener(evt -> startPaste());
+        selectionPopupMenu.add(miPaste);
+
+        javax.swing.JMenu specialPaste = new javax.swing.JMenu("Special Paste");
+        specialPaste.setEnabled(hasCompatibleRegionClipboard(true));
+        javax.swing.JMenuItem miPasteBoth = new javax.swing.JMenuItem(
+                isHeightView() ? "Paste with Tiles" : "Paste with Heights");
+        miPasteBoth.addActionListener(evt -> startPasteWithSecondaryData());
+        specialPaste.add(miPasteBoth);
+        selectionPopupMenu.add(specialPaste);
+
+        javax.swing.JMenuItem miDelete = new javax.swing.JMenuItem("Delete");
+        miDelete.setEnabled(selectionActions);
+        miDelete.addActionListener(evt -> deleteSelection());
+        selectionPopupMenu.add(miDelete);
+
+        javax.swing.JMenuItem miFill = new javax.swing.JMenuItem(
+                isHeightView() ? "Fill with Selected Height" : "Fill with Selected Tile");
+        miFill.setEnabled(selectionActions);
+        miFill.addActionListener(evt -> fillSelection());
+        selectionPopupMenu.add(miFill);
+        selectionPopupMenu.addSeparator();
+
+        javax.swing.JMenuItem miDeselect = new javax.swing.JMenuItem("Deselect");
+        miDeselect.addActionListener(evt -> deselect());
+        selectionPopupMenu.add(miDeselect);
+
         selectionPopupMenu.show(this, e.getX(), e.getY());
     }
 
@@ -2983,6 +3114,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
         clearSelection();
         pasting = false;
+        pasteWithSecondaryData = false;
 
         cameraRotX = defaultCamRotX;
         cameraRotY = defaultCamRotY;
@@ -3006,6 +3138,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
 
         clearSelection();
         pasting = false;
+        pasteWithSecondaryData = false;
 
         //orthoScale = 1.0f;
         cameraRotX = 0.0f;
@@ -3015,8 +3148,14 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         cameraZ = 32.0f;
 
         handler.getMainFrame().setOrthoToolsEnabled(false);
+        handler.getMainFrame().setHeightSelectionToolsEnabled(true);
 
-        if (editMode != EditMode.MODE_EDIT && editMode != EditMode.MODE_MOVE && editMode != EditMode.MODE_ZOOM) {
+        if (editMode != EditMode.MODE_EDIT && editMode != EditMode.MODE_MOVE
+                && editMode != EditMode.MODE_ZOOM
+                && editMode != EditMode.MODE_SELECT
+                && editMode != EditMode.MODE_SELECT_LASSO
+                && editMode != EditMode.MODE_SELECT_WAND
+                && editMode != EditMode.MODE_MOVE_SELECT) {
             handler.getMainFrame().getJtbModeEdit().setSelected(true);
             setEditMode(EditMode.MODE_EDIT);
         }
@@ -3440,6 +3579,7 @@ public class MapDisplay extends GLJPanel implements GLEventListener, MouseListen
         editMode = mode;
         if (mode != EditMode.MODE_SELECT) {
             pasting = false;
+            pasteWithSecondaryData = false;
         }
         setCursor(editMode.cursor);
     }

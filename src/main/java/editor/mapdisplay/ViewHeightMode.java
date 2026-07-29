@@ -21,14 +21,42 @@ import javax.swing.SwingUtilities;
  */
 public class ViewHeightMode extends ViewMode {
 
+    private static boolean isSelectionMode(MapDisplay.EditMode mode) {
+        return mode == MapDisplay.EditMode.MODE_SELECT
+                || mode == MapDisplay.EditMode.MODE_SELECT_LASSO
+                || mode == MapDisplay.EditMode.MODE_SELECT_WAND
+                || mode == MapDisplay.EditMode.MODE_MOVE_SELECT;
+    }
+
     @Override
     public void mousePressed(MapDisplay d, MouseEvent e) {
         if (d.SHIFT_PRESSED) {
-            if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isMiddleMouseButton(e)) {
+            if (SwingUtilities.isLeftMouseButton(e)
+                    && d.editMode == MapDisplay.EditMode.MODE_SELECT_WAND) {
+                d.setMapSelected(e);
+                d.wandSelect(e, true);
+                d.repaint();
+            } else if (SwingUtilities.isLeftMouseButton(e) && !d.isPasting()
+                    && !d.isFloatingMove()) {
+                d.setMapSelected(e);
+                d.startSelection(e, true);
+                d.repaint();
+            } else if (SwingUtilities.isMiddleMouseButton(e)) {
+                d.lastMouseX = e.getX();
+                d.lastMouseY = e.getY();
+            }
+        } else if (d.CTRL_PRESSED && !isSelectionMode(d.editMode)) {
+            if (SwingUtilities.isLeftMouseButton(e)
+                    || SwingUtilities.isMiddleMouseButton(e)) {
                 d.lastMouseX = e.getX();
                 d.lastMouseY = e.getY();
             }
         } else {
+            if (SwingUtilities.isRightMouseButton(e) && !d.isPasting()
+                    && d.isCursorInsideSelection(e)) {
+                d.showSelectionPopup(e);
+                return;
+            }
             switch (d.editMode) {
                 case MODE_EDIT:
                     d.setMapSelectedIfExists(e);
@@ -48,6 +76,56 @@ public class ViewHeightMode extends ViewMode {
                         d.repaint();
                         d.handler.getMainFrame().repaintHeightSelector();
                     }
+                    break;
+                case MODE_SELECT:
+                    if (SwingUtilities.isLeftMouseButton(e)) {
+                        if (d.isPasting()) {
+                            d.commitPaste(e);
+                        } else {
+                            d.setMapSelected(e);
+                            d.startSelection(e, false);
+                            d.repaint();
+                        }
+                    } else if (SwingUtilities.isRightMouseButton(e)) {
+                        if (d.isPasting()) {
+                            d.cancelPaste();
+                        } else if (d.hasSelection()) {
+                            d.showSelectionPopup(e);
+                        }
+                        d.repaint();
+                    }
+                    break;
+                case MODE_SELECT_LASSO:
+                    if (SwingUtilities.isLeftMouseButton(e)) {
+                        d.setMapSelected(e);
+                        d.startLasso(e);
+                        d.repaint();
+                    } else if (SwingUtilities.isRightMouseButton(e) && d.hasSelection()) {
+                        d.showSelectionPopup(e);
+                    }
+                    break;
+                case MODE_SELECT_WAND:
+                    if (SwingUtilities.isLeftMouseButton(e)) {
+                        d.setMapSelected(e);
+                        d.wandSelect(e, false);
+                        d.repaint();
+                    } else if (SwingUtilities.isRightMouseButton(e) && d.hasSelection()) {
+                        d.showSelectionPopup(e);
+                    }
+                    break;
+                case MODE_MOVE_SELECT:
+                    if (SwingUtilities.isLeftMouseButton(e)) {
+                        if (d.canBeginMoveSelection(e)) {
+                            d.beginMoveSelection(e);
+                            d.repaint();
+                        } else if (d.hasSelection()) {
+                            d.clearSelection();
+                            d.repaint();
+                        }
+                    } else if (SwingUtilities.isRightMouseButton(e) && d.hasSelection()) {
+                        d.showSelectionPopup(e);
+                    }
+                    break;
                 case MODE_MOVE:
                     if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isMiddleMouseButton(e)) {
                         d.lastMouseX = e.getX();
@@ -69,7 +147,33 @@ public class ViewHeightMode extends ViewMode {
 
     @Override
     public void mouseReleased(MapDisplay d, MouseEvent e) {
+        if (d.selDragActive && d.editMode != MapDisplay.EditMode.MODE_SELECT
+                && SwingUtilities.isLeftMouseButton(e)) {
+            d.endSelectionDrag();
+            d.repaint();
+            return;
+        }
         switch (d.editMode) {
+            case MODE_SELECT:
+                if (SwingUtilities.isLeftMouseButton(e) && !d.isPasting()
+                        && d.resizeHandle == 0 && !d.selDragMoved
+                        && !d.selStartedAdditive && d.hasSelection()) {
+                    d.clearSelection();
+                    d.repaint();
+                }
+                d.endSelectionDrag();
+                break;
+            case MODE_SELECT_LASSO:
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    d.endLasso();
+                    d.repaint();
+                }
+                break;
+            case MODE_MOVE_SELECT:
+                if (SwingUtilities.isLeftMouseButton(e) && d.isFloatingMove()) {
+                    d.commitMoveSelection(e);
+                }
+                break;
             case MODE_CLEAR:
                 d.handler.getMapMatrix().removeUnusedMaps();
                 break;
@@ -88,11 +192,28 @@ public class ViewHeightMode extends ViewMode {
     public void mouseDragged(MapDisplay d, MouseEvent e) {
         d.updateMousePostion(e);
         if (d.SHIFT_PRESSED) {
-            if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isMiddleMouseButton(e)) {
+            if (SwingUtilities.isLeftMouseButton(e)
+                    && d.selDragActive && !d.isPasting()) {
+                d.updateSelection(e);
+                d.repaint();
+            } else if (SwingUtilities.isMiddleMouseButton(e)) {
+                d.moveCamera(e);
+                d.repaint();
+            }
+        } else if (d.CTRL_PRESSED && !isSelectionMode(d.editMode)
+                && !d.selDragActive) {
+            if (SwingUtilities.isLeftMouseButton(e)
+                    || SwingUtilities.isMiddleMouseButton(e)) {
                 d.moveCamera(e);
                 d.repaint();
             }
         } else {
+            if (SwingUtilities.isLeftMouseButton(e) && d.selDragActive
+                    && d.editMode != MapDisplay.EditMode.MODE_SELECT && !d.isPasting()) {
+                d.updateSelection(e);
+                d.repaint();
+                return;
+            }
             switch (d.editMode) {
                 case MODE_EDIT:
                     if (SwingUtilities.isLeftMouseButton(e)) {
@@ -103,14 +224,26 @@ public class ViewHeightMode extends ViewMode {
                         d.repaint();
                     }
                     break;
+                case MODE_SELECT:
+                    if (SwingUtilities.isLeftMouseButton(e) && !d.isPasting()) {
+                        d.updateSelection(e);
+                        d.repaint();
+                    }
+                    break;
+                case MODE_SELECT_LASSO:
+                    if (SwingUtilities.isLeftMouseButton(e)) {
+                        d.updateLasso(e);
+                        d.repaint();
+                    }
+                    break;
+                case MODE_MOVE_SELECT:
+                    if (SwingUtilities.isLeftMouseButton(e) && d.isFloatingMove()) {
+                        d.repaint();
+                    }
+                    break;
                 case MODE_MOVE:
                     if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isMiddleMouseButton(e)) {
-                        d.cameraX -= (((float) ((e.getX() - d.lastMouseX))) / d.getWidth()) / (d.orthoScale / (d.cols + 2 * d.borderSize));
-                        d.cameraY += (((float) ((e.getY() - d.lastMouseY))) / d.getHeight()) / (d.orthoScale / (d.rows + 2 * d.borderSize));
-                        d.targetX = d.cameraX;
-                        d.targetY = d.cameraY;
-                        d.lastMouseX = e.getX();
-                        d.lastMouseY = e.getY();
+                        d.moveCamera(e);
                         d.repaint();
                     }
                     break;
@@ -122,6 +255,9 @@ public class ViewHeightMode extends ViewMode {
     public void mouseMoved(MapDisplay d, MouseEvent e) {
         d.updateMousePostion(e);
         d.updateCursorTileCoordsStatus(e);
+        if (d.editMode == MapDisplay.EditMode.MODE_SELECT && !d.isPasting()) {
+            d.updateSelectModeCursor(e);
+        }
         d.repaint();
     }
 
@@ -198,6 +334,28 @@ public class ViewHeightMode extends ViewMode {
             }
 
             d.drawActiveHeightMap(g);
+
+            switch (d.editMode) {
+                case MODE_SELECT:
+                    if (!d.isPasting()) {
+                        d.drawUnitTileBounds(g);
+                    }
+                    break;
+                case MODE_SELECT_LASSO:
+                case MODE_SELECT_WAND:
+                    d.drawUnitTileBounds(g);
+                    break;
+            }
+
+            if (!d.isFloatingMove()) {
+                d.drawSelectionOverlay(g);
+            }
+            if (d.isPasting()) {
+                d.drawPastePreview(g);
+            }
+            if (d.isFloatingMove()) {
+                d.drawFloatingMovePreview(g);
+            }
 
             g.setColor(Color.white);
             d.drawAllMapBounds(g);

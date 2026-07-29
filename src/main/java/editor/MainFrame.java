@@ -591,15 +591,16 @@ public class MainFrame extends JFrame {
 
     /**
      * Enables selection action buttons based on the current selection /
-     * clipboard. Outside the ortho view all of them stay disabled.
+     * clipboard. Outside the two grid-editing views all of them stay disabled.
      */
     public void updateSelectionActionButtons() {
         if (jbCopySelection == null || handler == null) {
             return;
         }
-        boolean ortho = mapDisplay.isOrthoView();
-        boolean hasSelection = ortho && mapDisplay.hasSelection();
-        boolean hasClipboard = ortho && handler.hasRegionClipboard();
+        boolean gridView = mapDisplay.isGridEditingView();
+        boolean hasSelection = gridView && mapDisplay.hasSelection();
+        boolean hasClipboard = gridView
+                && mapDisplay.hasCompatibleRegionClipboard(false);
         jbCopySelection.setEnabled(hasSelection);
         jbCutSelection.setEnabled(hasSelection);
         jbDeleteSelection.setEnabled(hasSelection);
@@ -850,6 +851,15 @@ public class MainFrame extends JFrame {
         jtbModeEllipseShape.setEnabled(enabled);
         jtbSmartTools.setEnabled(enabled);
         jtbAutoCollision.setEnabled(enabled);
+        updateSelectionActionButtons();
+    }
+
+    /** Height editing shares region selection and clipboard tools with ortho view. */
+    public void setHeightSelectionToolsEnabled(boolean enabled) {
+        jtbModeSelect.setEnabled(enabled);
+        jtbModeLasso.setEnabled(enabled);
+        jtbModeWand.setEnabled(enabled);
+        jtbModeMoveSelect.setEnabled(enabled);
         updateSelectionActionButtons();
     }
 

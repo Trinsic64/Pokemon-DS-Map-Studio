@@ -112,6 +112,82 @@ class GlobalMapOperationsTest {
     }
 
     @Test
+    void swapsCompleteTileAndHeightLayers() {
+        MapGrid grid = new MapGrid(null);
+        grid.tileLayers[1][2][3] = 7;
+        grid.heightLayers[1][2][3] = 5;
+        grid.tileLayers[4][2][3] = 12;
+        grid.heightLayers[4][2][3] = 9;
+
+        int changed = GlobalMapOperations.swapLayers(
+                grid, 1, 4, true, true);
+
+        assertEquals(4, changed);
+        assertEquals(12, grid.tileLayers[1][2][3]);
+        assertEquals(9, grid.heightLayers[1][2][3]);
+        assertEquals(7, grid.tileLayers[4][2][3]);
+        assertEquals(5, grid.heightLayers[4][2][3]);
+    }
+
+    @Test
+    void copiesOnlySelectedSourceTilesAndTheirHeights() {
+        MapGrid grid = new MapGrid(null);
+        grid.tileLayers[2][3][4] = 11;
+        grid.heightLayers[2][3][4] = 6;
+        grid.tileLayers[2][4][4] = 12;
+        grid.heightLayers[2][4][4] = 7;
+        grid.tileLayers[5][3][4] = 20;
+        grid.heightLayers[5][3][4] = 1;
+        grid.tileLayers[5][4][4] = 21;
+        grid.heightLayers[5][4][4] = 2;
+
+        int changed = GlobalMapOperations.transferSelectedTile(
+                grid, 2, 5, 11, true, true, false);
+
+        assertEquals(2, changed);
+        assertEquals(11, grid.tileLayers[5][3][4]);
+        assertEquals(6, grid.heightLayers[5][3][4]);
+        assertEquals(21, grid.tileLayers[5][4][4]);
+        assertEquals(2, grid.heightLayers[5][4][4]);
+        assertEquals(11, grid.tileLayers[2][3][4]);
+    }
+
+    @Test
+    void cutSelectedTilesClearsSourceTileButKeepsSourceHeight() {
+        MapGrid grid = new MapGrid(null);
+        grid.tileLayers[1][2][3] = 9;
+        grid.heightLayers[1][2][3] = 8;
+        grid.tileLayers[4][2][3] = 3;
+        grid.heightLayers[4][2][3] = 1;
+
+        int changed = GlobalMapOperations.transferSelectedTile(
+                grid, 1, 4, 9, true, true, true);
+
+        assertEquals(3, changed);
+        assertEquals(-1, grid.tileLayers[1][2][3]);
+        assertEquals(8, grid.heightLayers[1][2][3]);
+        assertEquals(9, grid.tileLayers[4][2][3]);
+        assertEquals(8, grid.heightLayers[4][2][3]);
+    }
+
+    @Test
+    void selectedTileHeightOnlyCopyLeavesBothTileLayersUntouched() {
+        MapGrid grid = new MapGrid(null);
+        grid.tileLayers[0][1][2] = 6;
+        grid.heightLayers[0][1][2] = 5;
+        grid.tileLayers[3][1][2] = 14;
+        grid.heightLayers[3][1][2] = 2;
+
+        int changed = GlobalMapOperations.transferSelectedTile(
+                grid, 0, 3, 6, false, true, false);
+
+        assertEquals(1, changed);
+        assertEquals(6, grid.tileLayers[0][1][2]);
+        assertEquals(14, grid.tileLayers[3][1][2]);
+        assertEquals(5, grid.heightLayers[3][1][2]);
+    }
+
+    @Test
     void adjustsOccupiedHeightsAndClampsToSupportedRange() {
         MapGrid grid = new MapGrid(null);
         grid.tileLayers[0][0][0] = 2;

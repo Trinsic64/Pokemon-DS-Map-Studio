@@ -35,7 +35,7 @@ import utils.Utils;
  */
 public class MapEditorHandler {
 
-    private static final String FALLBACK_VERSION = "2.4";
+    private static final String FALLBACK_VERSION = "2.3.2";
     public static final String versionName = "Pokemon DS Map Studio v"
             + getApplicationVersion() + " [AdAstra]";
 
@@ -93,7 +93,8 @@ public class MapEditorHandler {
     private int[][] tileLayerCopy = null;
     private int[][] heightLayerCopy = null;
 
-    //Region clipboard (tile selection copy/paste)
+    //Region clipboard. Tile and height data are independent: either array
+    //may be null when a normal copy was made from the other editing view.
     private int[][] tileRegionClipboard = null;
     private int[][] heightRegionClipboard = null;
     private boolean[][] regionClipboardMask = null;
@@ -741,6 +742,18 @@ public class MapEditorHandler {
     }
 
     public boolean hasRegionClipboard() {
+        return tileRegionClipboard != null || heightRegionClipboard != null;
+    }
+
+    public boolean hasTileRegionClipboard() {
+        return tileRegionClipboard != null;
+    }
+
+    public boolean hasHeightRegionClipboard() {
+        return heightRegionClipboard != null;
+    }
+
+    public boolean hasCompleteRegionClipboard() {
         return tileRegionClipboard != null && heightRegionClipboard != null;
     }
 

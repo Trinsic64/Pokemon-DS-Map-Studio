@@ -143,6 +143,109 @@ public final class GlobalMapOperations {
         return changed;
     }
 
+    /** Exchanges the selected data between two complete layers. */
+    public static int swapLayers(Map<Point, MapData> matrix, Set<Point> selectedMaps,
+                                 int firstLayer, int secondLayer,
+                                 boolean swapTiles, boolean swapHeights) {
+        if (firstLayer == secondLayer || (!swapTiles && !swapHeights)) {
+            return 0;
+        }
+        int changed = 0;
+        for (Point mapCoords : selectedMaps) {
+            MapData mapData = matrix.get(mapCoords);
+            if (mapData != null) {
+                changed += swapLayers(mapData.getGrid(), firstLayer, secondLayer,
+                        swapTiles, swapHeights);
+            }
+        }
+        return changed;
+    }
+
+    static int swapLayers(MapGrid grid, int firstLayer, int secondLayer,
+                          boolean swapTiles, boolean swapHeights) {
+        if (firstLayer == secondLayer || (!swapTiles && !swapHeights)) {
+            return 0;
+        }
+        int changed = 0;
+        if (swapTiles) {
+            changed += 2 * countDifferences(
+                    grid.tileLayers[firstLayer], grid.tileLayers[secondLayer]);
+            int[][] firstTiles = grid.tileLayers[firstLayer];
+            grid.tileLayers[firstLayer] = grid.tileLayers[secondLayer];
+            grid.tileLayers[secondLayer] = firstTiles;
+        }
+        if (swapHeights) {
+            changed += 2 * countDifferences(
+                    grid.heightLayers[firstLayer], grid.heightLayers[secondLayer]);
+            int[][] firstHeights = grid.heightLayers[firstLayer];
+            grid.heightLayers[firstLayer] = grid.heightLayers[secondLayer];
+            grid.heightLayers[secondLayer] = firstHeights;
+        }
+        return changed;
+    }
+
+    /**
+     * Copies only cells containing {@code selectedTile} in the source layer.
+     * Heights are copied at those same positions when requested. Cut mode
+     * clears only the matching source tiles and deliberately preserves their
+     * source-layer heights.
+     */
+    public static int transferSelectedTile(
+            Map<Point, MapData> matrix, Set<Point> selectedMaps,
+            int sourceLayer, int targetLayer, int selectedTile,
+            boolean copyTiles, boolean copyHeights, boolean cutSourceTiles) {
+        if (sourceLayer == targetLayer || selectedTile < 0
+                || (!copyTiles && !copyHeights)
+                || (cutSourceTiles && !copyTiles)) {
+            return 0;
+        }
+        int changed = 0;
+        for (Point mapCoords : selectedMaps) {
+            MapData mapData = matrix.get(mapCoords);
+            if (mapData != null) {
+                changed += transferSelectedTile(
+                        mapData.getGrid(), sourceLayer, targetLayer, selectedTile,
+                        copyTiles, copyHeights, cutSourceTiles);
+            }
+        }
+        return changed;
+    }
+
+    static int transferSelectedTile(
+            MapGrid grid, int sourceLayer, int targetLayer, int selectedTile,
+            boolean copyTiles, boolean copyHeights, boolean cutSourceTiles) {
+        if (sourceLayer == targetLayer || selectedTile < 0
+                || (!copyTiles && !copyHeights)
+                || (cutSourceTiles && !copyTiles)) {
+            return 0;
+        }
+        int changed = 0;
+        int[][] sourceTiles = grid.tileLayers[sourceLayer];
+        int[][] targetTiles = grid.tileLayers[targetLayer];
+        int[][] sourceHeights = grid.heightLayers[sourceLayer];
+        int[][] targetHeights = grid.heightLayers[targetLayer];
+        for (int x = 0; x < MapGrid.cols; x++) {
+            for (int y = 0; y < MapGrid.rows; y++) {
+                if (sourceTiles[x][y] != selectedTile) {
+                    continue;
+                }
+                if (copyTiles && targetTiles[x][y] != selectedTile) {
+                    targetTiles[x][y] = selectedTile;
+                    changed++;
+                }
+                if (copyHeights && targetHeights[x][y] != sourceHeights[x][y]) {
+                    targetHeights[x][y] = sourceHeights[x][y];
+                    changed++;
+                }
+                if (cutSourceTiles) {
+                    sourceTiles[x][y] = -1;
+                    changed++;
+                }
+            }
+        }
+        return changed;
+    }
+
     public static int clearLayers(Map<Point, MapData> matrix, Set<Point> selectedMaps,
                                   int[] layers, boolean clearTiles, boolean resetHeights) {
         int changed = 0;

@@ -1,19 +1,44 @@
-# Pokemon DS Map Studio 2.4 - Integrated Development Build
+# Pokemon DS Map Studio 2.3.2 - Building and Global Editing Release
 
-This build synchronizes the AdAstra v2.4 improvements with the Trinsic enhanced-tools line.
+This release brings the Building Enhancement and Global Map Editor work into
+the Trinsic enhanced-tools line as PDSMS v2.3.2.
 
-## Integrated Editing Improvements
+## Global Editing
 
-- Added the **Global Map Editor** for visually selecting matrix chunks and applying tile replacement,
-  bidirectional swaps, layer copies, height adjustments, and layer clearing.
-- Added tile thumbnails and names to global replacement controls instead of relying on numeric IDs alone.
-- Added independent L1-L9 edit scopes, row Apply controls, and removable rows for every selected Matrix chunk.
-- Added `GLOBAL_MAP_EDITOR_FEATURES.md` as the shared behaviour and future Operations reference.
-- Added per-layer editor opacity controls that do not modify exported map data.
-- Global edits across multiple maps and layers are recorded as one undoable operation.
-- Preserved the v2.4 safe **Replace and Remap** workflow for project-wide tile-ID remapping.
-- Included the v2.4 toolbar, selection, exporter, collision-label, file-dialog, dependency, and move-permission fixes.
-- Restricted local JAR loading to the three required bundled libraries so stray or legacy JARs cannot alter builds.
+- Added the **Global Tile Editor**, **Global Layer Editor**, and
+  **Global Height Editor** for visually editing selected Matrix chunks.
+- Added tile replacement, deletion through Empty Tile, bidirectional tile
+  swaps, layer copy, cut and paste, complete layer swaps, height adjustment,
+  and height reset.
+- Added live operation diagrams with tile previews, source and target layers,
+  match counts, target-change counts, and current/all-chunk scope.
+- Added visible Current Map and Preview Map highlighting for affected tiles.
+- Added independent L1-L9 scopes for every selected chunk, direct checkbox
+  editing, clickable whole-column toggles, and right-click Check all /
+  Uncheck all actions.
+- Global edits across multiple maps and layers are recorded as one undoable
+  operation.
+
+## Tile and Selection Workflow
+
+- Imported tile folders are immediately rendered and can be selectively
+  included during import.
+- Restored middle-mouse flood fill.
+- Separated tile and height clipboard data so normal tile copy/cut/paste
+  preserves destination heights.
+- Added dedicated tile/height clipboard behavior while Height Edit Mode is
+  active.
+- Restored a consistent transparency backdrop in standard tile lists without
+  changing Global Map Editor rendering.
+
+## Integrated Improvements
+
+- Preserved the safe **Replace and Remap** workflow for project-wide tile-ID
+  remapping.
+- Included the toolbar, selection, exporter, collision-label, file-dialog,
+  dependency, and move-permission fixes integrated by this branch.
+- Restricted local JAR loading to the three required bundled libraries so
+  stray or legacy JARs cannot alter builds.
 
 # Pokemon DS Map Studio 2.3.1 - Enhanced Tools Release
 
