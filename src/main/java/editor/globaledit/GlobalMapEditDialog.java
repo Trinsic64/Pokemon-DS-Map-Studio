@@ -110,8 +110,12 @@ public final class GlobalMapEditDialog extends JDialog {
 
     private final JComboBox<String> copySourceLayer = createLayerCombo();
     private final JComboBox<String> copyTargetLayer = createLayerCombo();
-    private final JCheckBox copyTiles = new JCheckBox("Tiles", true);
-    private final JCheckBox copyHeights = new JCheckBox("Heights", false);
+    private final JRadioButton copyTilesOnly =
+            new JRadioButton("Tiles only", true);
+    private final JRadioButton copyHeightsOnly =
+            new JRadioButton("Heights only");
+    private final JRadioButton copyTilesAndHeights =
+            new JRadioButton("Tiles + heights");
     private final JRadioButton copySelectedTileOnly =
             new JRadioButton("Selected Tile A only", true);
     private final JRadioButton copyEntireLayer =
@@ -863,14 +867,20 @@ public final class GlobalMapEditDialog extends JDialog {
         ButtonGroup scopeModes = new ButtonGroup();
         scopeModes.add(copySelectedTileOnly);
         scopeModes.add(copyEntireLayer);
+        ButtonGroup dataModes = new ButtonGroup();
+        dataModes.add(copyTilesOnly);
+        dataModes.add(copyHeightsOnly);
+        dataModes.add(copyTilesAndHeights);
         copySelectedTileOnly.setToolTipText(
                 "Transfer only cells containing the selected Tile A");
         copyEntireLayer.setToolTipText(
                 "Copy every cell from the source layer into the target layer");
-        copyTiles.setText("Tiles");
-        copyHeights.setText("Heights at matching cells");
-        copyTiles.setToolTipText("Copy tile values into the target layer");
-        copyHeights.setToolTipText("Copy matching height values into the target layer");
+        copyTilesOnly.setToolTipText(
+                "Copy tile values while leaving target heights unchanged");
+        copyHeightsOnly.setToolTipText(
+                "Copy height values while leaving both tile layers unchanged");
+        copyTilesAndHeights.setToolTipText(
+                "Copy both tile and height values into the target layer");
         copyAndPaste.setToolTipText("Keep matching Tile A cells in the source layer");
         cutAndPaste.setToolTipText(
                 "Clear matching source tiles after pasting; source heights remain unchanged");
@@ -884,7 +894,7 @@ public final class GlobalMapEditDialog extends JDialog {
                 createOperationGroup("Cells",
                         copySelectedTileOnly, copyEntireLayer),
                 createOperationGroup("Include",
-                        copyTiles, copyHeights),
+                        copyTilesOnly, copyHeightsOnly, copyTilesAndHeights),
                 createOperationGroup("Apply scope",
                         copyAllSelectedChunks,
                         createMutedLabel("Unchecked: current preview chunk"))),
@@ -1087,8 +1097,9 @@ public final class GlobalMapEditDialog extends JDialog {
             refreshCopyLayerControls();
             refreshPreview();
         });
-        copyTiles.addActionListener(e -> copyModeChanged());
-        copyHeights.addActionListener(e -> refreshPreview());
+        copyTilesOnly.addActionListener(e -> copyModeChanged());
+        copyHeightsOnly.addActionListener(e -> copyModeChanged());
+        copyTilesAndHeights.addActionListener(e -> copyModeChanged());
         copySelectedTileOnly.addActionListener(e -> copyModeChanged());
         copyEntireLayer.addActionListener(e -> copyModeChanged());
         copyAndPaste.addActionListener(e -> copyModeChanged());
@@ -1132,12 +1143,20 @@ public final class GlobalMapEditDialog extends JDialog {
         copyEntireLayer.setEnabled(!swapping);
         boolean selectedOnly = copySelectedTileOnly.isSelected() && !swapping;
         copyAndPaste.setEnabled(true);
-        cutAndPaste.setEnabled(selectedOnly && copyTiles.isSelected());
+        cutAndPaste.setEnabled(selectedOnly && copiesTiles());
         if (!cutAndPaste.isEnabled() && cutAndPaste.isSelected()) {
             copyAndPaste.setSelected(true);
         }
         refreshSourceFilter();
         refreshPreview();
+    }
+
+    private boolean copiesTiles() {
+        return copyTilesOnly.isSelected() || copyTilesAndHeights.isSelected();
+    }
+
+    private boolean copiesHeights() {
+        return copyHeightsOnly.isSelected() || copyTilesAndHeights.isSelected();
     }
 
     private void heightModeChanged() {
@@ -1808,7 +1827,7 @@ public final class GlobalMapEditDialog extends JDialog {
     }
 
     private int countLayerTargetChanges(Set<Point> maps) {
-        if (!copyTiles.isSelected()) {
+        if (!copiesTiles() && !copiesHeights()) {
             return 0;
         }
         int changed = 0;
@@ -1821,12 +1840,16 @@ public final class GlobalMapEditDialog extends JDialog {
             }
             int[][] source = data.getGrid().tileLayers[sourceLayer];
             int[][] target = data.getGrid().tileLayers[targetLayer];
+            int[][] sourceHeights = data.getGrid().heightLayers[sourceLayer];
+            int[][] targetHeights = data.getGrid().heightLayers[targetLayer];
             for (int x = 0; x < MapGrid.cols; x++) {
                 for (int y = 0; y < MapGrid.rows; y++) {
                     if ((!copySelectedTileOnly.isSelected()
                             || swapLayerContents.isSelected()
                             || source[x][y] == sourceTileIndex)
-                            && source[x][y] != target[x][y]) {
+                            && ((copiesTiles() && source[x][y] != target[x][y])
+                            || (copiesHeights()
+                            && sourceHeights[x][y] != targetHeights[x][y]))) {
                         changed++;
                     }
                 }
@@ -1835,28 +1858,12 @@ public final class GlobalMapEditDialog extends JDialog {
         return changed;
     }
 
-    private int countLayerSourceTiles(Set<Point> maps) {
+    private int countLayerSourceCells(Set<Point> maps) {
         if (copySelectedTileOnly.isSelected()
                 && !swapLayerContents.isSelected()) {
             return countCopyMatches(maps);
         }
-        int count = 0;
-        int sourceLayer = copySourceLayer.getSelectedIndex();
-        for (Point point : maps) {
-            MapData data = handler.getMapMatrix().getMap(point);
-            if (data == null) {
-                continue;
-            }
-            int[][] source = data.getGrid().tileLayers[sourceLayer];
-            for (int x = 0; x < MapGrid.cols; x++) {
-                for (int y = 0; y < MapGrid.rows; y++) {
-                    if (source[x][y] >= 0) {
-                        count++;
-                    }
-                }
-            }
-        }
-        return count;
+        return maps.size() * MapGrid.cols * MapGrid.rows;
     }
 
     private boolean isExcluded(Point point, int layer, int x, int y) {
@@ -1938,7 +1945,7 @@ public final class GlobalMapEditDialog extends JDialog {
                     return current;
                 }
                 int sourceTile = data.getGrid().tileLayers[sourceLayer][x][y];
-                if (swapLayerContents.isSelected() && copyTiles.isSelected()) {
+                if (swapLayerContents.isSelected() && copiesTiles()) {
                     if (layer == sourceLayer) {
                         return data.getGrid().tileLayers[targetLayer][x][y];
                     }
@@ -1951,13 +1958,13 @@ public final class GlobalMapEditDialog extends JDialog {
                     if (sourceTile != sourceTileIndex) {
                         return current;
                     }
-                    if (copyTiles.isSelected() && layer == targetLayer) {
+                    if (copiesTiles() && layer == targetLayer) {
                         return sourceTile;
                     }
                     if (cutAndPaste.isSelected() && layer == sourceLayer) {
                         return EMPTY_TILE;
                     }
-                } else if (copyTiles.isSelected() && layer == targetLayer) {
+                } else if (copiesTiles() && layer == targetLayer) {
                     return sourceTile;
                 }
                 return current;
@@ -1976,7 +1983,7 @@ public final class GlobalMapEditDialog extends JDialog {
             case 1:
                 int sourceLayer = copySourceLayer.getSelectedIndex();
                 int targetLayer = copyTargetLayer.getSelectedIndex();
-                if (swapLayerContents.isSelected() && copyHeights.isSelected()
+                if (swapLayerContents.isSelected() && copiesHeights()
                         && sourceLayer != targetLayer) {
                     if (layer == sourceLayer) {
                         return data.getGrid().heightLayers[targetLayer][x][y];
@@ -1985,7 +1992,7 @@ public final class GlobalMapEditDialog extends JDialog {
                         return data.getGrid().heightLayers[sourceLayer][x][y];
                     }
                 }
-                if (copyHeights.isSelected() && sourceLayer != targetLayer
+                if (copiesHeights() && sourceLayer != targetLayer
                         && layer == targetLayer
                         && (!copySelectedTileOnly.isSelected()
                         || data.getGrid().tileLayers[sourceLayer][x][y]
@@ -2178,7 +2185,7 @@ public final class GlobalMapEditDialog extends JDialog {
                 }
                 break;
             case 1:
-                if (!copyTiles.isSelected() && !copyHeights.isSelected()) {
+                if (!copiesTiles() && !copiesHeights()) {
                     showValidation("Choose tile layout, height layout, or both.");
                     return;
                 }
@@ -2192,8 +2199,8 @@ public final class GlobalMapEditDialog extends JDialog {
                     showValidation("Choose a real Tile A to move or copy.");
                     return;
                 }
-                if (cutAndPaste.isSelected() && !copyTiles.isSelected()) {
-                    showValidation("Enable Tiles before using Move.");
+                if (cutAndPaste.isSelected() && !copiesTiles()) {
+                    showValidation("Cut and paste requires Tiles only or Tiles + heights.");
                     return;
                 }
                 if (!swapLayerContents.isSelected()
@@ -2253,19 +2260,19 @@ public final class GlobalMapEditDialog extends JDialog {
                             handler.getMapMatrix().getMatrix(), oneMap,
                             copySourceLayer.getSelectedIndex(),
                             copyTargetLayer.getSelectedIndex(),
-                            copyTiles.isSelected(), copyHeights.isSelected())
+                            copiesTiles(), copiesHeights())
                             : copySelectedTileOnly.isSelected()
                             ? GlobalMapOperations.transferSelectedTile(
                             handler.getMapMatrix().getMatrix(), oneMap,
                             copySourceLayer.getSelectedIndex(),
                             copyTargetLayer.getSelectedIndex(), sourceTileIndex,
-                            copyTiles.isSelected(), copyHeights.isSelected(),
+                            copiesTiles(), copiesHeights(),
                             cutAndPaste.isSelected())
                             : GlobalMapOperations.copyLayer(
                             handler.getMapMatrix().getMatrix(), oneMap,
                             copySourceLayer.getSelectedIndex(),
                             copyTargetLayer.getSelectedIndex(),
-                            copyTiles.isSelected(), copyHeights.isSelected());
+                            copiesTiles(), copiesHeights());
                     break;
                 case 2:
                     mapChanged = resetHeightsMode.isSelected()
@@ -3101,9 +3108,9 @@ public final class GlobalMapEditDialog extends JDialog {
                     if (!selectedCell) {
                         continue;
                     }
-                    boolean tileChange = copyTiles.isSelected()
+                    boolean tileChange = copiesTiles()
                             && sourceTiles[x][y] != targetTiles[x][y];
-                    boolean heightChange = copyHeights.isSelected()
+                    boolean heightChange = copiesHeights()
                             && sourceHeights[x][y] != targetHeights[x][y];
                     if (!tileChange && !heightChange) {
                         continue;
@@ -3441,7 +3448,7 @@ public final class GlobalMapEditDialog extends JDialog {
                             && !isTileChoiceConfigured(sourceTileIndex)) {
                         return "CHOOSE TILE A";
                     }
-                    return copyTiles.isSelected() || copyHeights.isSelected()
+                    return copiesTiles() || copiesHeights()
                             ? "READY" : "CHOOSE DATA";
                 case 2:
                     return adjustHeightsMode.isSelected()
@@ -3477,15 +3484,15 @@ public final class GlobalMapEditDialog extends JDialog {
                 case 1:
                     Set<Point> layerMaps = layerOperationScopeMaps(
                             matrixSelection.getSelectedMaps());
-                    int sourceTiles = countLayerSourceTiles(layerMaps);
+                    int sourceCells = countLayerSourceCells(layerMaps);
                     int targetChanges = countLayerTargetChanges(layerMaps);
-                    String data = copyTiles.isSelected() && copyHeights.isSelected()
-                            ? "Tiles + matching heights"
-                            : copyTiles.isSelected() ? "Tiles only"
-                            : copyHeights.isSelected() ? "Matching heights only"
+                    String data = copiesTiles() && copiesHeights()
+                            ? "Tiles + heights"
+                            : copiesTiles() ? "Tiles only"
+                            : copiesHeights() ? "Heights only"
                             : "No data selected";
-                    String cells = sourceTiles + (sourceTiles == 1
-                            ? " tile found" : " tiles found");
+                    String cells = sourceCells + (sourceCells == 1
+                            ? " source cell" : " source cells");
                     String transfer = swapLayerContents.isSelected()
                             ? "SWAP LAYERS" : cutAndPaste.isSelected()
                             ? "CUT AND PASTE" : "COPY";
@@ -3496,7 +3503,7 @@ public final class GlobalMapEditDialog extends JDialog {
                             {transfer, data},
                             {"TO \u00b7 Layer "
                                     + (copyTargetLayer.getSelectedIndex() + 1),
-                                    targetChanges + " target tile changes"}
+                                    targetChanges + " target cell changes"}
                     };
                 case 2:
                     int amount = ((Number) heightAmount.getValue()).intValue();

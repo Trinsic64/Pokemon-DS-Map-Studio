@@ -52,7 +52,6 @@ public class TileSelector extends JPanel {
     private static final int PINNED_DIVIDER_HEIGHT = 5;
     private static final int MIN_PINNED_BODY_HEIGHT = 32;
     private static final Color TILE_TRANSPARENCY_BACKDROP = new Color(96, 96, 96);
-    private static final Color TILE_TRANSPARENCY_OUTLINE = new Color(124, 124, 124);
     private int rows;
     private ArrayList<Rectangle> boundingBoxes = new ArrayList<>();
     private BufferedImage display;
@@ -1001,9 +1000,6 @@ public class TileSelector extends JPanel {
         if (showTileTransparencyBackdrop) {
             g.setColor(TILE_TRANSPARENCY_BACKDROP);
             g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-            g.setColor(TILE_TRANSPARENCY_OUTLINE);
-            g.drawRect(bounds.x, bounds.y,
-                    Math.max(0, bounds.width - 1), Math.max(0, bounds.height - 1));
         }
         g.drawImage(getDisplayThumbnail(tile, placement.section),
                 bounds.x, bounds.y, null);

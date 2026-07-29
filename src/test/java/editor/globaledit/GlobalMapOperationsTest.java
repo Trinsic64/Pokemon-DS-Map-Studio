@@ -112,6 +112,24 @@ class GlobalMapOperationsTest {
     }
 
     @Test
+    void copiesCompleteHeightLayerWithoutChangingEitherTileLayer() {
+        MapGrid grid = new MapGrid(null);
+        grid.tileLayers[2][3][4] = 11;
+        grid.heightLayers[2][3][4] = 6;
+        grid.tileLayers[5][3][4] = 20;
+        grid.heightLayers[5][3][4] = 1;
+
+        int changed = GlobalMapOperations.copyLayer(
+                grid, 2, 5, false, true);
+
+        assertEquals(1, changed);
+        assertEquals(11, grid.tileLayers[2][3][4]);
+        assertEquals(20, grid.tileLayers[5][3][4]);
+        assertEquals(6, grid.heightLayers[2][3][4]);
+        assertEquals(6, grid.heightLayers[5][3][4]);
+    }
+
+    @Test
     void swapsCompleteTileAndHeightLayers() {
         MapGrid grid = new MapGrid(null);
         grid.tileLayers[1][2][3] = 7;

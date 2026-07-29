@@ -1,3 +1,21 @@
+# Pokemon DS Map Studio 2.3.3 - Height Transfer and Tile List Polish
+
+This patch makes height-only layer transfers explicit and restores a cleaner
+flat transparency backdrop in tile folders.
+
+## Improvements
+
+- Added clear **Tiles only**, **Heights only**, and **Tiles + heights** data
+  modes to the Global Layer Editor.
+- **Heights only** copies height values from the chosen source layer to the
+  target layer without changing tiles in either layer.
+- Height-only operations use the existing current/all-selected-chunks scope,
+  undo history, live preview highlighting, and target cell-change count.
+- Removed the per-tile outline from transparency backdrops in tile folders
+  while retaining the flat opaque grey transparency color.
+- Kept the tile-list presentation change isolated from Global Map Editor map
+  rendering.
+
 # Pokemon DS Map Studio 2.3.2 - Building and Global Editing Release
 
 This release brings the Building Enhancement and Global Map Editor work into

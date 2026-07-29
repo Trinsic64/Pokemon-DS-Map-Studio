@@ -35,7 +35,7 @@ import utils.Utils;
  */
 public class MapEditorHandler {
 
-    private static final String FALLBACK_VERSION = "2.3.2";
+    private static final String FALLBACK_VERSION = "2.3.3";
     public static final String versionName = "Pokemon DS Map Studio v"
             + getApplicationVersion() + " [AdAstra]";
 
