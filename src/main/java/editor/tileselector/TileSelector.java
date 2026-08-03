@@ -7,7 +7,7 @@ import javax.swing.GroupLayout;
 import editor.handler.MapEditorHandler;
 import editor.mapdisplay.MapDisplay;
 import editor.mapdisplay.ViewMode;
-import editor.tileseteditor.ImportTilesDialog;
+import editor.tileseteditor.ImportPaletteFolderDialog;
 import editor.tileseteditor.TilesetEditorDialog;
 import formats.collisions.CollisionTypes;
 
@@ -26,6 +26,7 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -120,6 +121,9 @@ public class TileSelector extends JPanel {
                 return "All Tiles";
             }
             String path = folder.getPath();
+            if (PaletteFolder.FAVORITES.equals(path)) {
+                return "★ Favorites";
+            }
             int idx = path.lastIndexOf('/');
             return idx < 0 ? path : path.substring(idx + 1);
         }
@@ -373,8 +377,10 @@ public class TileSelector extends JPanel {
                     handler.getMainFrame().getMapDisplay().setEditMode(MapDisplay.EditMode.MODE_EDIT);
                     handler.getMainFrame().getJtbModeEdit().setSelected(true);
                 }
-                //Arm the organize drag (folder / layout slot placement)
-                tileDragArmed = folderViewActive;
+                //Organizing belongs to the Tile Editor.  In the main map UI a
+                //small mouse movement while choosing a drawing tile must never
+                //rearrange the palette.
+                tileDragArmed = folderViewActive && dialog != null;
                 tileDragIndex = index;
                 tileDragStart = evt.getPoint();
             } else if (SwingUtilities.isRightMouseButton(evt)) {
@@ -1815,6 +1821,15 @@ public class TileSelector extends JPanel {
         miRename.addActionListener(e -> renameTile(index));
         menu.add(miRename);
 
+        JCheckBoxMenuItem miFavorite = new JCheckBoxMenuItem("Favorite",
+                handler.getTileset().isFavorite(tile));
+        miFavorite.addActionListener(e -> {
+            handler.getTileset().setFavorite(tile, miFavorite.isSelected());
+            updateLayout();
+            repaint();
+        });
+        menu.add(miFavorite);
+
         ArrayList<Integer> single = new ArrayList<>();
         single.add(index);
         menu.add(buildFolderMoveMenu(single, occurrenceFolder));
@@ -1876,6 +1891,20 @@ public class TileSelector extends JPanel {
                 && !rangeSelectionSection.allTiles && rangeSelectionSection.folder != null
                 ? rangeSelectionSection.folder.getPath() : null;
         menu.add(buildFolderMoveMenu(new ArrayList<>(multiSelected), currentFolder));
+
+        boolean allFavorites = true;
+        for (int index : multiSelected) {
+            if (!handler.getTileset().isFavorite(handler.getTileset().get(index))) {
+                allFavorites = false;
+                break;
+            }
+        }
+        JMenuItem miFavorite = new JMenuItem(allFavorites
+                ? "Remove from Favorites" : "Add to Favorites");
+        final boolean favorite = !allFavorites;
+        miFavorite.addActionListener(e -> setFavoriteTiles(
+                new ArrayList<>(multiSelected), favorite));
+        menu.add(miFavorite);
 
         JMenuItem miClear = new JMenuItem("Clear Selection");
         miClear.addActionListener(e -> {
@@ -2049,6 +2078,42 @@ public class TileSelector extends JPanel {
             });
             menu.add(miColumns);
 
+            ArrayList<PaletteFolder> children =
+                    handler.getTileset().getDirectSubfolders(folder.getPath());
+            JMenu sortSubfolders = new JMenu("Sort Subfolders");
+            sortSubfolders.setEnabled(children.size() > 1);
+            sortSubfolders.setToolTipText(
+                    "Reorder direct subfolders only; tiles and deeper folders are unchanged");
+
+            JMenuItem sortAz = new JMenuItem("Sort A-Z");
+            sortAz.addActionListener(e -> sortSubfolders(folder,
+                    Comparator.comparing(f -> getFolderLeafName(f.getPath()),
+                            String.CASE_INSENSITIVE_ORDER)));
+            sortSubfolders.add(sortAz);
+
+            JMenuItem sortZa = new JMenuItem("Sort Z-A");
+            sortZa.addActionListener(e -> sortSubfolders(folder,
+                    Comparator.comparing((PaletteFolder f) ->
+                            getFolderLeafName(f.getPath()), String.CASE_INSENSITIVE_ORDER)
+                            .reversed()));
+            sortSubfolders.add(sortZa);
+            sortSubfolders.addSeparator();
+
+            Comparator<PaletteFolder> byTileCount = Comparator.comparingInt(
+                    f -> handler.getTileset().getPaletteFolderTileCount(f.getPath()));
+            Comparator<PaletteFolder> nameTieBreak = Comparator.comparing(
+                    f -> getFolderLeafName(f.getPath()), String.CASE_INSENSITIVE_ORDER);
+            JMenuItem sortMostTiles = new JMenuItem("Most Tiles First");
+            sortMostTiles.addActionListener(e -> sortSubfolders(folder,
+                    byTileCount.reversed().thenComparing(nameTieBreak)));
+            sortSubfolders.add(sortMostTiles);
+
+            JMenuItem sortFewestTiles = new JMenuItem("Fewest Tiles First");
+            sortFewestTiles.addActionListener(e -> sortSubfolders(folder,
+                    byTileCount.thenComparing(nameTieBreak)));
+            sortSubfolders.add(sortFewestTiles);
+            menu.add(sortSubfolders);
+
             //Reordering swaps the folder with its previous / next sibling
             //(folders sharing the same parent)
             ArrayList<PaletteFolder> siblings = getSiblingFolders(folder);
@@ -2143,21 +2208,27 @@ public class TileSelector extends JPanel {
         try {
             File bundle = chooser.getSelectedFile();
             Tileset preview = PaletteFolderBundleIO.preview(bundle);
-            ImportTilesDialog selectionDialog =
-                    new ImportTilesDialog(SwingUtilities.getWindowAncestor(this));
-            selectionDialog.init(preview, true);
+            java.awt.Window owner = SwingUtilities.getWindowAncestor(this);
+            ImportPaletteFolderDialog selectionDialog =
+                    new ImportPaletteFolderDialog(owner, preview, handler.getTileset());
             selectionDialog.setLocationRelativeTo(getDialogParent());
             selectionDialog.setVisible(true);
-            if (selectionDialog.getReturnValue() != ImportTilesDialog.APPROVE_OPTION) {
+            if (!selectionDialog.isApproved()) {
                 return;
             }
-            Set<Integer> selectedIndices = new HashSet<>();
-            for (Tile tile : selectionDialog.getTilesSelected()) {
-                selectedIndices.add(preview.getTiles().indexOf(tile));
+            Set<Integer> selectedIndices = selectionDialog.getSelectedIndices();
+            Map<Integer, Integer> duplicates = PaletteFolderBundleIO.findDuplicateIndices(
+                    preview, handler.getTileset(), selectedIndices);
+            Map<Integer, PaletteFolderBundleIO.DuplicateChoice> choices =
+                    ImportPaletteFolderDialog.resolveDuplicates(
+                            owner, preview, handler.getTileset(), duplicates);
+            if (choices == null) {
+                return;
             }
 
-            int added = PaletteFolderBundleIO.read(
-                    bundle, handler.getTileset(), selectedIndices);
+            PaletteFolderBundleIO.ImportResult result =
+                    PaletteFolderBundleIO.readWithChoices(
+                            bundle, handler.getTileset(), selectedIndices, choices);
             handler.getMainFrame().renderTilesetThumbnails();
             //Folder imports can add materials after MapDisplay created its GL
             //texture list. Refresh both live displays now; opening the Tile
@@ -2173,9 +2244,10 @@ public class TileSelector extends JPanel {
                 dialog.updateViewTileIndex();
             }
             JOptionPane.showMessageDialog(getDialogParent(),
-                    "Folder imported. " + selectedIndices.size() + " tile(s) selected; "
-                            + added + " new tile(s) were added and "
-                            + (selectedIndices.size() - added) + " matching tile(s) were reused.",
+                    "Folder imported. " + result.getSelected() + " tile(s) selected; "
+                            + result.getAdded() + " new, " + result.getOverwritten()
+                            + " overwritten, and " + result.getKept()
+                            + " original tile(s) kept.",
                     "Import Palette Folder", JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(getDialogParent(),
@@ -2242,6 +2314,25 @@ public class TileSelector extends JPanel {
     private void swapFolders(PaletteFolder a, PaletteFolder b) {
         ArrayList<PaletteFolder> folders = handler.getTileset().getPaletteFolders();
         java.util.Collections.swap(folders, folders.indexOf(a), folders.indexOf(b));
+    }
+
+    private void sortSubfolders(PaletteFolder parent,
+            Comparator<PaletteFolder> comparator) {
+        handler.getTileset().sortDirectSubfolders(parent.getPath(), comparator);
+        parent.setCollapsed(false);
+        updateLayout();
+        repaint();
+    }
+
+    private void setFavoriteTiles(ArrayList<Integer> indices, boolean favorite) {
+        for (int index : indices) {
+            if (index >= 0 && index < handler.getTileset().size()) {
+                handler.getTileset().setFavorite(
+                        handler.getTileset().get(index), favorite);
+            }
+        }
+        updateLayout();
+        repaint();
     }
 
     /** Normalizes a folder path: no '|', trimmed segments, no empty segments. */

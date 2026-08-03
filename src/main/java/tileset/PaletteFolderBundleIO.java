@@ -13,6 +13,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.zip.ZipEntry;
@@ -28,6 +30,30 @@ public final class PaletteFolderBundleIO {
     private static final String ROOT_NAME = "root.txt";
 
     private PaletteFolderBundleIO() {
+    }
+
+    public enum DuplicateChoice {
+        KEEP_EXISTING,
+        OVERWRITE
+    }
+
+    public static final class ImportResult {
+        private final int selected;
+        private final int added;
+        private final int kept;
+        private final int overwritten;
+
+        ImportResult(int selected, int added, int kept, int overwritten) {
+            this.selected = selected;
+            this.added = added;
+            this.kept = kept;
+            this.overwritten = overwritten;
+        }
+
+        public int getSelected() { return selected; }
+        public int getAdded() { return added; }
+        public int getKept() { return kept; }
+        public int getOverwritten() { return overwritten; }
     }
 
     public static void write(File output, Tileset source, PaletteFolder root) throws IOException {
@@ -74,6 +100,18 @@ public final class PaletteFolderBundleIO {
      */
     public static int read(File input, Tileset target, Set<Integer> selectedIndices)
             throws Exception {
+        return readWithChoices(input, target, selectedIndices,
+                Collections.emptyMap()).getAdded();
+    }
+
+    /**
+     * Imports a selected subset and applies an explicit decision for each tile
+     * that already exists in the destination.  Missing decisions are safe and
+     * keep the destination tile.
+     */
+    public static ImportResult readWithChoices(File input, Tileset target,
+            Set<Integer> selectedIndices, Map<Integer, DuplicateChoice> duplicateChoices)
+            throws Exception {
         Path temp = Files.createTempDirectory("pdsms-folder-import-");
         try {
             unzip(input.toPath(), temp);
@@ -87,17 +125,27 @@ public final class PaletteFolderBundleIO {
             String targetRoot = uniqueRootPath(target, sourceRoot);
             Map<String, String> folderPaths = importFolders(imported, target, sourceRoot, targetRoot);
 
+            int selected = 0;
             int added = 0;
+            int kept = 0;
+            int overwritten = 0;
             Map<Integer, Integer> importedTileIndices = new HashMap<>();
             for (int sourceIndex = 0; sourceIndex < imported.size(); sourceIndex++) {
                 if (selectedIndices != null && !selectedIndices.contains(sourceIndex)) {
                     continue;
                 }
+                selected++;
                 Tile sourceTile = imported.get(sourceIndex);
                 int existingIndex = target.indexOfTileVisualData(sourceTile);
                 Tile targetTile;
                 if (existingIndex >= 0) {
-                    targetTile = target.get(existingIndex);
+                    if (duplicateChoices.get(sourceIndex) == DuplicateChoice.OVERWRITE) {
+                        targetTile = replaceTileData(target, existingIndex, sourceTile);
+                        overwritten++;
+                    } else {
+                        targetTile = target.get(existingIndex);
+                        kept++;
+                    }
                 } else {
                     targetTile = sourceTile.clone();
                     targetTile.setPaletteFolder(PaletteFolder.UNSORTED);
@@ -137,10 +185,44 @@ public final class PaletteFolderBundleIO {
                 }
                 target.getSmartGridArray().add(insert, targetGrid);
             }
-            return added;
+            return new ImportResult(selected, added, kept, overwritten);
         } finally {
             deleteTree(temp);
         }
+    }
+
+    /** Maps each preview tile to its matching destination tile, when present. */
+    public static Map<Integer, Integer> findDuplicateIndices(
+            Tileset preview, Tileset target, Set<Integer> selectedIndices) {
+        Map<Integer, Integer> duplicates = new LinkedHashMap<>();
+        for (int sourceIndex = 0; sourceIndex < preview.size(); sourceIndex++) {
+            if (selectedIndices != null && !selectedIndices.contains(sourceIndex)) {
+                continue;
+            }
+            int targetIndex = target.indexOfTileVisualData(preview.get(sourceIndex));
+            if (targetIndex >= 0) {
+                duplicates.put(sourceIndex, targetIndex);
+            }
+        }
+        return duplicates;
+    }
+
+    private static Tile replaceTileData(Tileset target, int targetIndex, Tile sourceTile) {
+        Tile existing = target.get(targetIndex);
+        Map<String, Integer> existingMemberships =
+                new LinkedHashMap<>(existing.getPaletteFolderSlots());
+        Tile replacement = sourceTile.clone();
+        replacement.setPaletteFolder(PaletteFolder.UNSORTED);
+
+        //Use the normal import path to remap/materialize texture references,
+        //then put the replacement back at the stable index used by maps.
+        target.importTile(replacement);
+        target.getTiles().remove(target.getTiles().size() - 1);
+        for (Map.Entry<String, Integer> membership : existingMemberships.entrySet()) {
+            replacement.addPaletteFolder(membership.getKey(), membership.getValue());
+        }
+        target.getTiles().set(targetIndex, replacement);
+        return replacement;
     }
 
     private static boolean canImportSmartGrid(SmartGrid grid, Set<Integer> selectedIndices) {

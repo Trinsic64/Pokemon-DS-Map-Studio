@@ -415,6 +415,12 @@ public final class GlobalMapEditDialog extends JDialog {
         JPanel browserSurface = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         browserSurface.add(browser);
         JScrollPane scroll = new JScrollPane(browserSurface);
+        //TileSelector paints folder headers into a backing image and also
+        //paints sticky headers.  JViewport's default BLIT scrolling can copy
+        //those transient header pixels into the tile body (most visibly in
+        //the replacement/B browser while scrolling upward).  Always repaint
+        //the viewport instead of copying stale pixels.
+        scroll.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
         scroll.getVerticalScrollBar().setUnitIncrement(32);
         scroll.getHorizontalScrollBar().setUnitIncrement(16);
         scroll.getViewport().setBackground(UIManager.getColor("Panel.background"));

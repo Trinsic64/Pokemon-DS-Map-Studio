@@ -26,10 +26,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.LinkedHashSet;
+import java.util.function.Consumer;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
@@ -327,23 +325,17 @@ public class TilesetEditorDialog extends JDialog {
     private void jcbMaterialActionPerformed(ActionEvent evt) {
         if (handler.getTileset().size() > 0) {
             if (jComboBoxListenerActive) {
-
-                handler.getTileSelected().getTextureIDs().set(
-                        tileHandler.getTextureIdIndexSelected(),
+                int materialSlot = tileHandler.getTextureIdIndexSelected();
+                if (materialSlot < 0 || materialSlot
+                        >= handler.getTileSelected().getTextureIDs().size()) {
+                    return;
+                }
+                int oldMaterial = handler.getTileSelected().getTextureIDs().get(materialSlot);
+                ArrayList<Integer> affected = TileBatchEditor.replaceMaterial(
+                        handler.getTileset(), getSelectedTileIndices(), oldMaterial,
                         jcbMaterial.getSelectedIndex());
-
-                updateSelectedTileThumbnail();
-                /*
-                TilesetRenderer tr = new TilesetRenderer(handler.getTileset());
-                for (int i = 0; i < handler.getTileset().size(); i++) {
-                tr.renderTileThumbnail(i);
-                }*/
-
-                //tileHandler.updateTileThumbnail(handler.getTileIndexSelected()); //PROBLEMATIC
-                tileSelector.updateTile(handler.getTileIndexSelected());
-
+                refreshBatchTileVisuals(affected, false, true);
                 updateViewTexture();
-
                 updateViewJLTileMaterials(jlTileMaterials.getSelectedIndex());
             }
         }
@@ -355,10 +347,8 @@ public class TilesetEditorDialog extends JDialog {
             value--;
             if (value >= 1) {
                 jtfSizeX.setText(String.valueOf(value));
-                handler.getTileSelected().setWidth(value);
-                updateSelectedTileThumbnail();
-                tileSelector.updateLayout();
-                tileSelector.repaint();
+                final int newValue = value;
+                applyPropertyToSelected(tile -> tile.setWidth(newValue), true);
             }
         }
     }
@@ -369,10 +359,8 @@ public class TilesetEditorDialog extends JDialog {
             value++;
             if (value <= Tile.maxTileSize) {
                 jtfSizeX.setText(String.valueOf(value));
-                handler.getTileSelected().setWidth(value);
-                updateSelectedTileThumbnail();
-                tileSelector.updateLayout();
-                tileSelector.repaint();
+                final int newValue = value;
+                applyPropertyToSelected(tile -> tile.setWidth(newValue), true);
             }
         }
     }
@@ -383,10 +371,8 @@ public class TilesetEditorDialog extends JDialog {
             value--;
             if (value >= 1) {
                 jtfSizeY.setText(String.valueOf(value));
-                handler.getTileSelected().setHeight(value);
-                updateSelectedTileThumbnail();
-                tileSelector.updateLayout();
-                tileSelector.repaint();
+                final int newValue = value;
+                applyPropertyToSelected(tile -> tile.setHeight(newValue), true);
             }
         }
     }
@@ -397,10 +383,8 @@ public class TilesetEditorDialog extends JDialog {
             value++;
             if (value <= Tile.maxTileSize) {
                 jtfSizeY.setText(String.valueOf(value));
-                handler.getTileSelected().setHeight(value);
-                updateSelectedTileThumbnail();
-                tileSelector.updateLayout();
-                tileSelector.repaint();
+                final int newValue = value;
+                applyPropertyToSelected(tile -> tile.setHeight(newValue), true);
             }
         }
     }
@@ -522,13 +506,15 @@ public class TilesetEditorDialog extends JDialog {
 
     private void jcbTileableXActionPerformed(ActionEvent evt) {
         if (handler.getTileset().size() > 0) {
-            handler.getTileSelected().setXtileable(jcbTileableX.isSelected());
+            applyPropertyToSelected(tile ->
+                    tile.setXtileable(jcbTileableX.isSelected()), false, false);
         }
     }
 
     private void jcbTileableYActionPerformed(ActionEvent evt) {
         if (handler.getTileset().size() > 0) {
-            handler.getTileSelected().setYtileable(jcbTileableY.isSelected());
+            applyPropertyToSelected(tile ->
+                    tile.setYtileable(jcbTileableY.isSelected()), false, false);
         }
     }
 
@@ -632,7 +618,8 @@ public class TilesetEditorDialog extends JDialog {
     private void jcbGlobalTexMappingActionPerformed(ActionEvent evt) {
         if (handler.getTileset().size() > 0) {
             boolean selected = jcbGlobalTexMapping.isSelected();
-            handler.getTileSelected().setGlobalTextureMapping(selected);
+            applyPropertyToSelected(tile ->
+                    tile.setGlobalTextureMapping(selected), false);
             jtfGlobalTexScale.setEditable(selected);
             jbGlobalTexScale.setEnabled(selected);
             jtfGlobalTexScale.setBackground(selected ? defaultTextPaneBackground : defaultInactiveTextPaneColor);
@@ -706,16 +693,13 @@ public class TilesetEditorDialog extends JDialog {
                 sources.add(handler.getTileset().get(index));
                 insertionIndex = Math.max(insertionIndex, index + 1);
             }
-            Map<String, FolderDuplicationPlan> folderPlans
-                    = buildFolderDuplicationPlans(sources);
-
             ArrayList<Tile> duplicates = new ArrayList<>();
             for (Tile source : sources) {
                 Tile duplicate = source.clone();
                 duplicates.add(duplicate);
                 handler.getTileset().getTiles().add(insertionIndex++, duplicate);
             }
-            applyFolderDuplicationPlans(folderPlans, sources, duplicates);
+            TileFolderDuplicatePlanner.apply(handler.getTileset(), sources, duplicates);
 
             tileDisplay.requestUpdate();
             tileSelector.updateLayout();
@@ -724,121 +708,6 @@ public class TilesetEditorDialog extends JDialog {
             updateViewTileIndex();
         }
 
-    }
-
-    private Map<String, FolderDuplicationPlan> buildFolderDuplicationPlans(
-            ArrayList<Tile> sources) {
-        Map<String, FolderDuplicationPlan> plans = new LinkedHashMap<>();
-        for (Tile source : sources) {
-            for (Map.Entry<String, Integer> membership
-                    : source.getPaletteFolderSlots().entrySet()) {
-                String path = membership.getKey();
-                int slot = membership.getValue();
-                PaletteFolder folder = handler.getTileset().getPaletteFolder(path);
-                if (folder == null || folder.getColumns() <= 0 || slot < 0) {
-                    continue;
-                }
-                plans.computeIfAbsent(path,
-                        ignored -> new FolderDuplicationPlan(folder)).add(source, slot);
-            }
-        }
-        for (FolderDuplicationPlan plan : plans.values()) {
-            plan.finish(sources);
-        }
-        return plans;
-    }
-
-    private void applyFolderDuplicationPlans(Map<String, FolderDuplicationPlan> plans,
-            ArrayList<Tile> sources, ArrayList<Tile> duplicates) {
-        Set<Tile> sourceSet = new HashSet<>(sources);
-        Set<Tile> duplicateSet = new HashSet<>(duplicates);
-        for (Map.Entry<String, FolderDuplicationPlan> entry : plans.entrySet()) {
-            String path = entry.getKey();
-            FolderDuplicationPlan plan = entry.getValue();
-            int columns = plan.folder.getColumns();
-            int oldRows = plan.folder.getRows();
-
-            for (Tile tile : handler.getTileset().getTiles()) {
-                if (sourceSet.contains(tile) || duplicateSet.contains(tile)) {
-                    continue;
-                }
-                int slot = tile.getPaletteSlot(path);
-                if (slot < 0) {
-                    continue;
-                }
-                int row = slot / columns;
-                if (row >= plan.insertionRow) {
-                    tile.setPaletteSlot(path, slot + plan.blockHeight * columns);
-                }
-            }
-
-            for (int i = 0; i < sources.size(); i++) {
-                Integer sourceSlot = plan.sourceSlots.get(sources.get(i));
-                if (sourceSlot == null) {
-                    continue;
-                }
-                int sourceRow = sourceSlot / columns;
-                int sourceColumn = sourceSlot % columns;
-                int duplicateRow = plan.insertionRow + sourceRow - plan.minRow;
-                duplicates.get(i).setPaletteSlot(path,
-                        duplicateRow * columns + sourceColumn);
-            }
-
-            int requiredRows = oldRows + plan.blockHeight;
-            for (Tile tile : handler.getTileset().getTiles()) {
-                int slot = tile.getPaletteSlot(path);
-                if (slot >= 0) {
-                    requiredRows = Math.max(requiredRows, slot / columns
-                            + Math.max(1, tile.getPaletteDisplayHeight()));
-                }
-            }
-            plan.folder.setRows(requiredRows);
-            plan.folder.setCollapsed(false);
-        }
-    }
-
-    private class FolderDuplicationPlan {
-        final PaletteFolder folder;
-        final Map<Tile, Integer> sourceSlots = new LinkedHashMap<>();
-        int minRow = Integer.MAX_VALUE;
-        int insertionRow;
-        int blockHeight;
-
-        FolderDuplicationPlan(PaletteFolder folder) {
-            this.folder = folder;
-        }
-
-        void add(Tile tile, int slot) {
-            sourceSlots.put(tile, slot);
-            int row = slot / folder.getColumns();
-            minRow = Math.min(minRow, row);
-            insertionRow = Math.max(insertionRow,
-                    row + Math.max(1, tile.getPaletteDisplayHeight()));
-        }
-
-        void finish(ArrayList<Tile> sources) {
-            blockHeight = Math.max(1, insertionRow - minRow);
-            Set<Tile> sourceSet = new HashSet<>(sources);
-            boolean movedBoundary;
-            do {
-                movedBoundary = false;
-                for (Tile tile : handler.getTileset().getTiles()) {
-                    if (sourceSet.contains(tile)) {
-                        continue;
-                    }
-                    int slot = tile.getPaletteSlot(folder.getPath());
-                    if (slot < 0) {
-                        continue;
-                    }
-                    int row = slot / folder.getColumns();
-                    int bottom = row + Math.max(1, tile.getPaletteDisplayHeight());
-                    if (row < insertionRow && bottom > insertionRow) {
-                        insertionRow = bottom;
-                        movedBoundary = true;
-                    }
-                }
-            } while (movedBoundary);
-        }
     }
 
     private void jbFlipModelActionPerformed(ActionEvent evt) {
@@ -959,13 +828,15 @@ public class TilesetEditorDialog extends JDialog {
 
     private void jcbUtileableActionPerformed(ActionEvent evt) {
         if (handler.getTileset().size() > 0) {
-            handler.getTileSelected().setUtileable(jcbUtileable.isSelected());
+            applyPropertyToSelected(tile ->
+                    tile.setUtileable(jcbUtileable.isSelected()), false, false);
         }
     }
 
     private void jcbVtileableActionPerformed(ActionEvent evt) {
         if (handler.getTileset().size() > 0) {
-            handler.getTileSelected().setVtileable(jcbVtileable.isSelected());
+            applyPropertyToSelected(tile ->
+                    tile.setVtileable(jcbVtileable.isSelected()), false, false);
         }
     }
 
@@ -1576,7 +1447,14 @@ public class TilesetEditorDialog extends JDialog {
     }
 
     public void updateViewTileIndex() {
+        int selectedCount = getSelectedTileIndices().size();
+        jLabel3.setText(selectedCount > 1
+                ? "Tiles selected (" + selectedCount + "):" : "Tile selected:");
         jtfIndexTile.setText(String.valueOf(handler.getTileIndexSelected()));
+        jcbMaterial.setToolTipText(selectedCount > 1
+                ? "Replace the active material on the " + selectedCount
+                        + " highlighted tiles that use it"
+                : "Change the selected material on this tile");
     }
 
     private void updateViewTextNames() {
@@ -1659,6 +1537,49 @@ public class TilesetEditorDialog extends JDialog {
         updateTileThumbnail(handler.getTileIndexSelected());
 
         tileDisplay.requestUpdate();
+    }
+
+    private ArrayList<Integer> getSelectedTileIndices() {
+        LinkedHashSet<Integer> unique = new LinkedHashSet<>(
+                tileSelector.getIndicesSelected());
+        unique.removeIf(index -> index == null || index < 0
+                || index >= handler.getTileset().size());
+        if (unique.isEmpty() && handler.getTileIndexSelected() >= 0
+                && handler.getTileIndexSelected() < handler.getTileset().size()) {
+            unique.add(handler.getTileIndexSelected());
+        }
+        return new ArrayList<>(unique);
+    }
+
+    private void applyPropertyToSelected(Consumer<Tile> edit, boolean relayout) {
+        applyPropertyToSelected(edit, relayout, true);
+    }
+
+    private void applyPropertyToSelected(Consumer<Tile> edit,
+            boolean relayout, boolean rerender) {
+        ArrayList<Integer> indices = getSelectedTileIndices();
+        for (int index : indices) {
+            edit.accept(handler.getTileset().get(index));
+        }
+        refreshBatchTileVisuals(indices, relayout, rerender);
+    }
+
+    private void refreshBatchTileVisuals(ArrayList<Integer> indices,
+            boolean relayout, boolean rerender) {
+        if (indices.isEmpty()) {
+            return;
+        }
+        if (rerender) {
+            updateTileThumbnails(indices);
+        }
+        if (relayout || rerender) {
+            tileSelector.updateLayout();
+            tileSelector.repaint();
+            //The main map window uses its own cached palette backing image.
+            handler.getMainFrame().updateTileSelectorLayout();
+        }
+        tileDisplay.requestUpdate();
+        tileDisplay.repaint();
     }
 
     private void updateTileThumbnails(ArrayList<Integer> indicesTiles) {
@@ -1791,9 +1712,13 @@ public class TilesetEditorDialog extends JDialog {
         try {
             value = Float.valueOf(jtfGlobalTexScale.getText());
         } catch (NumberFormatException e) {
-            value = handler.getTileSelected().getGlobalTextureScale();
+            jtfGlobalTexScale.setText(String.valueOf(
+                    handler.getTileSelected().getGlobalTextureScale()));
+            return;
         }
-        handler.getTileSelected().setGlobalTextureScale(value);
+        final float appliedValue = value;
+        applyPropertyToSelected(tile ->
+                tile.setGlobalTextureScale(appliedValue), false);
         jtfGlobalTexScale.setText(String.valueOf(value));
         jtfGlobalTexScaleActive.value = false;
         jtfGlobalTexScale.setBackground(greenColor);
@@ -1806,9 +1731,11 @@ public class TilesetEditorDialog extends JDialog {
         try {
             value = Float.valueOf(jtfXOffset.getText());
         } catch (NumberFormatException e) {
-            value = handler.getTileSelected().getXOffset();
+            jtfXOffset.setText(String.valueOf(handler.getTileSelected().getXOffset()));
+            return;
         }
-        handler.getTileSelected().setXOffset(value);
+        final float appliedValue = value;
+        applyPropertyToSelected(tile -> tile.setXOffset(appliedValue), false);
         jtfXOffset.setText(String.valueOf(value));
         jtfXOffsetActive.value = false;
         jtfXOffset.setBackground(greenColor);
@@ -1821,9 +1748,11 @@ public class TilesetEditorDialog extends JDialog {
         try {
             value = Float.valueOf(jtfYOffset.getText());
         } catch (NumberFormatException e) {
-            value = handler.getTileSelected().getYOffset();
+            jtfYOffset.setText(String.valueOf(handler.getTileSelected().getYOffset()));
+            return;
         }
-        handler.getTileSelected().setYOffset(value);
+        final float appliedValue = value;
+        applyPropertyToSelected(tile -> tile.setYOffset(appliedValue), false);
         jtfYOffset.setText(String.valueOf(value));
         jtfYOffsetActive.value = false;
         jtfYOffset.setBackground(greenColor);
@@ -1836,9 +1765,11 @@ public class TilesetEditorDialog extends JDialog {
         try {
             value = Float.valueOf(jtfZOffset.getText());
         } catch (NumberFormatException e) {
-            value = handler.getTileSelected().getZOffset();
+            jtfZOffset.setText(String.valueOf(handler.getTileSelected().getZOffset()));
+            return;
         }
-        handler.getTileSelected().setZOffset(value);
+        final float appliedValue = value;
+        applyPropertyToSelected(tile -> tile.setZOffset(appliedValue), false);
         jtfZOffset.setText(String.valueOf(value));
         jtfZOffsetActive.value = false;
         jtfZOffset.setBackground(greenColor);

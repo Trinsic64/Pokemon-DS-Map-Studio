@@ -107,6 +107,129 @@ public class Tileset {
         return folder;
     }
 
+    /** Creates the shared Favorites folder near the top of the root list. */
+    public PaletteFolder getOrCreateFavoritesFolder() {
+        PaletteFolder folder = getPaletteFolder(PaletteFolder.FAVORITES);
+        if (folder != null) {
+            return folder;
+        }
+        folder = new PaletteFolder(PaletteFolder.FAVORITES);
+        int insert = 0;
+        while (insert < paletteFolders.size()
+                && paletteFolders.get(insert).getPath().isEmpty()) {
+            insert++;
+        }
+        paletteFolders.add(insert, folder);
+        return folder;
+    }
+
+    public boolean isFavorite(Tile tile) {
+        return tile != null && tile.isInPaletteFolder(PaletteFolder.FAVORITES);
+    }
+
+    public void setFavorite(Tile tile, boolean favorite) {
+        if (tile == null) {
+            return;
+        }
+        if (favorite) {
+            if (isFavorite(tile)) {
+                return;
+            }
+            PaletteFolder folder = getOrCreateFavoritesFolder();
+            int slot = findOpenFavoriteSlot(folder, tile);
+            tile.addPaletteFolder(PaletteFolder.FAVORITES, slot);
+            folder.setRows(Math.max(folder.getRows(),
+                    slot / folder.getColumns()
+                            + Math.max(1, tile.getPaletteDisplayHeight())));
+        } else {
+            tile.removePaletteFolder(PaletteFolder.FAVORITES);
+        }
+    }
+
+    private int findOpenFavoriteSlot(PaletteFolder folder, Tile candidate) {
+        int columns = Math.max(1, folder.getColumns());
+        int candidateWidth = Math.min(columns,
+                Math.max(1, candidate.getPaletteDisplayWidth()));
+        int candidateHeight = Math.max(1, candidate.getPaletteDisplayHeight());
+        for (int slot = 0; slot < columns * 4096; slot++) {
+            int column = slot % columns;
+            int row = slot / columns;
+            if (column + candidateWidth > columns) {
+                continue;
+            }
+            java.awt.Rectangle proposed = new java.awt.Rectangle(
+                    column, row, candidateWidth, candidateHeight);
+            boolean occupied = false;
+            for (Tile tile : tiles) {
+                int otherSlot = tile.getPaletteSlot(PaletteFolder.FAVORITES);
+                if (otherSlot < 0) {
+                    continue;
+                }
+                java.awt.Rectangle other = new java.awt.Rectangle(
+                        otherSlot % columns, otherSlot / columns,
+                        Math.min(columns, Math.max(1, tile.getPaletteDisplayWidth())),
+                        Math.max(1, tile.getPaletteDisplayHeight()));
+                if (proposed.intersects(other)) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (!occupied) {
+                return slot;
+            }
+        }
+        return getPaletteFolderTileCount(PaletteFolder.FAVORITES) * columns;
+    }
+
+    /** Direct children only, in their current visible order. */
+    public ArrayList<PaletteFolder> getDirectSubfolders(String parentPath) {
+        ArrayList<PaletteFolder> children = new ArrayList<>();
+        for (PaletteFolder folder : paletteFolders) {
+            String parent = getParentFolderPath(folder.getPath());
+            if (parentPath == null ? parent == null : parentPath.equals(parent)) {
+                if (!folder.getPath().isEmpty()) {
+                    children.add(folder);
+                }
+            }
+        }
+        return children;
+    }
+
+    /**
+     * Reorders only the list positions occupied by direct children. Parents,
+     * deeper descendants, tiles, and every unrelated folder retain their
+     * positions and data.
+     */
+    public void sortDirectSubfolders(String parentPath,
+            java.util.Comparator<PaletteFolder> comparator) {
+        ArrayList<Integer> positions = new ArrayList<>();
+        ArrayList<PaletteFolder> children = new ArrayList<>();
+        for (int i = 0; i < paletteFolders.size(); i++) {
+            PaletteFolder folder = paletteFolders.get(i);
+            String parent = getParentFolderPath(folder.getPath());
+            if (parentPath == null ? parent == null : parentPath.equals(parent)) {
+                if (!folder.getPath().isEmpty()) {
+                    positions.add(i);
+                    children.add(folder);
+                }
+            }
+        }
+        children.sort(comparator);
+        for (int i = 0; i < positions.size(); i++) {
+            paletteFolders.set(positions.get(i), children.get(i));
+        }
+    }
+
+    public int getPaletteFolderTileCount(String path) {
+        int count = 0;
+        for (Tile tile : tiles) {
+            if (tile.isInPaletteFolder(path)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     /**
      * Creates the folder and any missing parent folders of its path
      * ("Terrain/Grass/HGSS" nests HGSS inside Grass inside Terrain).

@@ -10,6 +10,7 @@ public class PaletteFolder {
 
     public static final String UNSORTED = "";
     public static final String UNSORTED_DISPLAY_NAME = "All Tiles";
+    public static final String FAVORITES = "Favorites";
     public static final int DEFAULT_COLUMNS = 8;
     public static final int DEFAULT_ROWS = 4;
 

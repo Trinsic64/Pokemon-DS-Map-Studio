@@ -1,3 +1,37 @@
+# Pokemon DS Map Studio 2.3.4 - Palette Workflow and Bulk Tile Editing
+
+This patch expands palette-folder organization, makes folder imports safer,
+and adds selection-aware editing to the Tileset Editor.
+
+## Folder Import and Organization
+
+- Added a folder-aware, two-pane import selector with native Ctrl/Shift tile
+  selection and live new/duplicate counts.
+- Added visual duplicate comparisons with per-tile **Keep Original** and
+  **Overwrite** choices before import.
+- Added a persistent **Favorites** folder. Favoriting a tile adds another
+  palette occurrence without removing it from its existing folders.
+- Added direct-child **Sort Subfolders** options for A-Z, Z-A, most tiles, and
+  fewest tiles while leaving tiles, deeper ordering, and unrelated folders
+  unchanged.
+- Disabled accidental folder-tile dragging in the main map window while
+  retaining palette arrangement tools in the Tileset Editor.
+
+## Tileset Editor
+
+- Material changes now replace the active source material across highlighted
+  tiles that use it and skip selected tiles that do not.
+- Tile size, offsets, tileability, global texture mapping, and texture scale
+  changes now apply consistently across the highlighted tile selection.
+- Improved duplicate placement so one-row groups stay on the same row when
+  possible, multi-row shapes are preserved, and lower rows are shifted without
+  introducing tile overlap.
+
+## Global Map Editor
+
+- Fixed stale viewport blitting that could duplicate Tileset B folder headers
+  while scrolling upward through several open subfolders.
+
 # Pokemon DS Map Studio 2.3.3 - Height Transfer and Tile List Polish
 
 This patch makes height-only layer transfers explicit and restores a cleaner
