@@ -25,7 +25,7 @@ The Windows release includes a Java runtime and can be started with `Pokemon DS 
 
 If a launcher does not open, try this command from the extracted ZIP folder:
 ```shell
-java -jar "lib/Pokemon DS Map Studio-2.4.1.jar"
+java -jar "lib/Pokemon DS Map Studio-2.4.2.jar"
 ```
 and look at the output.
 If you don't fully understand that, please open an issue in the appropriate section of this repository.

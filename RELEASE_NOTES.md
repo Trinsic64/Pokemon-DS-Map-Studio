@@ -1,3 +1,11 @@
+# Pokemon DS Map Studio 2.4.2 - Selective Folder Import Hotfix
+
+- Importing selected tiles now creates only their chosen folder placements and
+  the parent folders needed to contain them.
+- Unselected sibling folders no longer appear empty in the destination.
+- When a tile belongs to several folders, importing it from one folder does
+  not bring along its other placements unless those are also selected.
+
 # Pokemon DS Map Studio 2.4.1 - Toolbar and Release Layout
 
 - Restored the **Map for: Game** control to the right edge of the main toolbar.
