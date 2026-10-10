@@ -25,7 +25,7 @@ test {
     useJUnitPlatform()
 }
 
-version '2.3.5'
+version '2.4.1'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -90,10 +90,12 @@ tasks.register('portableDist', Sync) {
 }
 
 tasks.register('portableZip', Zip) {
-    dependsOn tasks.named('portableDist')
-    archiveFileName = "${releaseBaseName}-Portable.zip"
+    dependsOn tasks.named('installDist')
+    archiveFileName = "${releaseBaseName}.zip"
     destinationDirectory = layout.buildDirectory.dir('release')
-    from(layout.buildDirectory.dir("portable/${releaseBaseName}")) {
-        into releaseBaseName
+    from(layout.buildDirectory.dir("install/${rootProject.name}"))
+    from('converter') {
+        into 'bin/converter'
     }
+    from('README.md', 'RELEASE_NOTES.md', 'GLOBAL_MAP_EDITOR_FEATURES.md')
 }

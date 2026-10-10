@@ -1,3 +1,11 @@
+# Pokemon DS Map Studio 2.4.1 - Toolbar and Release Layout
+
+- Restored the **Map for: Game** control to the right edge of the main toolbar.
+- Packaged the Java release with the AdAstra-style top-level `bin/` and `lib/`
+  folders. Launch scripts and the converter folder are under `bin/`.
+- Kept the separate Windows package with its bundled Java runtime.
+- Updated converter lookup for the `bin/converter` location.
+
 # Pokemon DS Map Studio 2.3.5 - Laptop Display Scaling
 
 This patch improves the main editor on laptops using 125% Windows display

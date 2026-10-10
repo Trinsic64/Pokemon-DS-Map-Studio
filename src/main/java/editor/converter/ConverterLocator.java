@@ -42,6 +42,7 @@ public final class ConverterLocator {
         Path current = start == null ? null : start.toAbsolutePath().normalize();
         for (int depth = 0; current != null && depth < 6; depth++) {
             candidates.add(current.resolve("converter").resolve(EXECUTABLE));
+            candidates.add(current.resolve("bin").resolve("converter").resolve(EXECUTABLE));
             current = current.getParent();
         }
     }

@@ -363,12 +363,16 @@ public class MainFrame extends JFrame {
         //the minimum width of the entire editor.
         Container contentPane = getContentPane();
         contentPane.remove(jtMainToolbar);
+        contentPane.remove(jpGameInfo);
         JScrollPane toolbarScroll = new JScrollPane(jtMainToolbar,
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
                 ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         toolbarScroll.setBorder(null);
         toolbarScroll.setMinimumSize(new Dimension(0, jtMainToolbar.getPreferredSize().height));
-        contentPane.add(toolbarScroll, "cell 0 0,growx");
+        JPanel header = new JPanel(new BorderLayout());
+        header.add(toolbarScroll, BorderLayout.CENTER);
+        header.add(jpGameInfo, BorderLayout.EAST);
+        contentPane.add(header, "cell 0 0,growx");
 
         //The vertical tool stack also exceeds the usable height on many
         //scaled laptop screens. Let it scroll instead of stretching the map

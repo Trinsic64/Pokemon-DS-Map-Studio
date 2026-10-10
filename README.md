@@ -21,12 +21,11 @@ This is due to the additional 3D layer, and the new "exportgroup" and "egcenter"
 
 ## Running
 Pokemon DS Map Studio has been tested under Windows, Linux and MacOS.
-The Windows release includes a Java runtime and can be started with `Pokemon DS Map Studio.exe` without installing Java. The portable release requires Java 11 or newer.
-Pokemon DS Map Studio can be executed by double clicking the "PokemonDsMapStudio.jar" file. 
+The Windows release includes a Java runtime and can be started with `Pokemon DS Map Studio.exe` without installing Java. The Java ZIP uses the AdAstra-style `bin/` and `lib/` folders and requires Java 11 or newer. Start it with `bin/Pokemon DS Map Studio.bat` on Windows or `bin/Pokemon DS Map Studio` on Linux/macOS.
 
-If it doesn't open, try typing the following command in a terminal:
+If a launcher does not open, try this command from the extracted ZIP folder:
 ```shell
-java -jar PokemonDSMapStudio.jar
+java -jar "lib/Pokemon DS Map Studio-2.4.1.jar"
 ```
 and look at the output.
 If you don't fully understand that, please open an issue in the appropriate section of this repository.
@@ -37,4 +36,4 @@ sh -c "$(wget -O- https://raw.githubusercontent.com/AdAstra-LD/Pokemon-DS-Map-St
 ```
 
 ## Notes
-If you wish to export `.nsbmd` files, place your legally obtained `g3dcvtr.exe` in the release's `converter` folder. Both supplied Xerces DLLs may remain in that folder; the tested converter build requires `xerces-c_2_5_0.dll` specifically. The release cannot redistribute `g3dcvtr.exe`.
+If you wish to export `.nsbmd` files, place your legally obtained `g3dcvtr.exe` in the Java ZIP's `bin/converter` folder or the Windows package's `converter` folder. Both supplied Xerces DLLs may remain in that folder; the tested converter build requires `xerces-c_2_5_0.dll` specifically. The release cannot redistribute `g3dcvtr.exe`.
