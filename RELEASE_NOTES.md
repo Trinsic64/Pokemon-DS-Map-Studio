@@ -1,3 +1,15 @@
+# Pokemon DS Map Studio 2.3.5 - Laptop Display Scaling
+
+This patch improves the main editor on laptops using 125% Windows display
+scaling and other layouts with less usable screen space.
+
+- Reduced the main window's fixed minimum size so it can fit on narrower
+  logical desktops.
+- Made the top toolbar, vertical editing tools, and status readouts scroll
+  when their contents exceed the available space.
+- Kept the map editing area and right-side controls visible at laptop widths
+  by allowing the map viewport to shrink and sizing the split pane after layout.
+
 # Pokemon DS Map Studio 2.3.4 - Palette Workflow and Bulk Tile Editing
 
 This patch expands palette-folder organization, makes folder imports safer,

@@ -358,7 +358,41 @@ public class MainFrame extends JFrame {
         jpStatusBar.add(jlCursorCoordsTitle, 3);
         jpStatusBar.add(jlCursorCoords, 4);
 
-        //initComponents() packed the frame before this toolbar rebuild.
+        //The toolbar can be wider than a laptop's logical desktop at 125%
+        //display scaling. Keep every button reachable without making it set
+        //the minimum width of the entire editor.
+        Container contentPane = getContentPane();
+        contentPane.remove(jtMainToolbar);
+        JScrollPane toolbarScroll = new JScrollPane(jtMainToolbar,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        toolbarScroll.setBorder(null);
+        toolbarScroll.setMinimumSize(new Dimension(0, jtMainToolbar.getPreferredSize().height));
+        contentPane.add(toolbarScroll, "cell 0 0,growx");
+
+        //The vertical tool stack also exceeds the usable height on many
+        //scaled laptop screens. Let it scroll instead of stretching the map
+        //area beyond the bottom edge of the window.
+        jpMainWindow.remove(jpButtons);
+        JScrollPane toolsScroll = new JScrollPane(jpButtons,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        toolsScroll.setBorder(null);
+        toolsScroll.setMinimumSize(new Dimension(0, 0));
+        toolsScroll.setPreferredSize(new Dimension(jpButtons.getPreferredSize().width, 400));
+        jpMainWindow.add(toolsScroll, "cell 1 0,growy");
+        jpMainWindow.setMinimumSize(new Dimension(0, 0));
+
+        //Long map and tile readouts should remain accessible when the status
+        //bar is wider than the window.
+        contentPane.remove(jpStatusBar);
+        JScrollPane statusScroll = new JScrollPane(jpStatusBar,
+                ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+                ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        statusScroll.setBorder(null);
+        statusScroll.setMinimumSize(new Dimension(0, jpStatusBar.getPreferredSize().height));
+        contentPane.add(statusScroll, "cell 0 2,growx");
+
         //Repack with the compact tools column and keep the window inside
         //the usable desktop area (not behind the task bar).
         pack();
@@ -368,6 +402,10 @@ public class MainFrame extends JFrame {
         setSize(fittedWidth, fittedHeight);
         setLocation(usable.x + (usable.width - fittedWidth) / 2,
                 usable.y + (usable.height - fittedHeight) / 2);
+        SwingUtilities.invokeLater(() -> {
+            jspMainWindow.setDividerLocation(Math.max(0, jspMainWindow.getWidth() - 230));
+            updateMapDisplaySize();
+        });
     }
 
     private void restoreClassicMenuBar() {
@@ -1949,7 +1987,7 @@ public class MainFrame extends JFrame {
         //======== this ========
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setTitle("Pokemon DS Map Studio");
-        setMinimumSize(new Dimension(1300, 710));
+        setMinimumSize(new Dimension(800, 600));
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -2750,18 +2788,18 @@ public class MainFrame extends JFrame {
                     //======== mapDisplay ========
                     {
                         mapDisplay.setBorder(new LineBorder(new Color(102, 102, 102)));
-                        mapDisplay.setMinimumSize(new Dimension(440, 440));
+                        mapDisplay.setMinimumSize(new Dimension(300, 300));
                         mapDisplay.setMaximumSize(new Dimension(580, 580));
 
                         GroupLayout mapDisplayLayout = new GroupLayout(mapDisplay);
                         mapDisplay.setLayout(mapDisplayLayout);
                         mapDisplayLayout.setHorizontalGroup(
                                 mapDisplayLayout.createParallelGroup()
-                                        .addGap(0, 542, Short.MAX_VALUE)
+                                        .addGap(300, 542, Short.MAX_VALUE)
                         );
                         mapDisplayLayout.setVerticalGroup(
                                 mapDisplayLayout.createParallelGroup()
-                                        .addGap(0, 542, Short.MAX_VALUE)
+                                        .addGap(300, 542, Short.MAX_VALUE)
                         );
                     }
                     mapDisplayContainer.add(mapDisplay);
