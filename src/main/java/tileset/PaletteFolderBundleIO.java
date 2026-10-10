@@ -112,6 +112,13 @@ public final class PaletteFolderBundleIO {
     public static ImportResult readWithChoices(File input, Tileset target,
             Set<Integer> selectedIndices, Map<Integer, DuplicateChoice> duplicateChoices)
             throws Exception {
+        return readWithChoices(input, target, selectedIndices, duplicateChoices, null);
+    }
+
+    /** Selected folder paths identify the placements chosen in the dialog. */
+    public static ImportResult readWithChoices(File input, Tileset target,
+            Set<Integer> selectedIndices, Map<Integer, DuplicateChoice> duplicateChoices,
+            Map<Integer, Set<String>> selectedFolderPaths) throws Exception {
         Path temp = Files.createTempDirectory("pdsms-folder-import-");
         try {
             unzip(input.toPath(), temp);
@@ -123,7 +130,8 @@ public final class PaletteFolderBundleIO {
             String sourceRoot = new String(Files.readAllBytes(rootPath), StandardCharsets.UTF_8).trim();
             Tileset imported = TilesetIO.readTilesetFromFile(tilesetPath.toString());
             String targetRoot = uniqueRootPath(target, sourceRoot);
-            Map<String, String> folderPaths = importFolders(imported, target, sourceRoot, targetRoot);
+            Map<String, String> folderPaths = importFolders(imported, target, sourceRoot,
+                    targetRoot, selectedIndices, selectedFolderPaths);
 
             int selected = 0;
             int added = 0;
@@ -156,6 +164,11 @@ public final class PaletteFolderBundleIO {
                 importedTileIndices.put(sourceIndex, existingIndex);
                 for (Map.Entry<String, Integer> membership
                         : sourceTile.getPaletteFolderSlots().entrySet()) {
+                    if (selectedFolderPaths != null && !selectedFolderPaths
+                            .getOrDefault(sourceIndex, Collections.emptySet())
+                            .contains(membership.getKey())) {
+                        continue;
+                    }
                     String mapped = folderPaths.get(membership.getKey());
                     if (mapped != null) {
                         targetTile.addPaletteFolder(mapped, membership.getValue());
@@ -175,6 +188,9 @@ public final class PaletteFolderBundleIO {
                 }
                 SmartGrid targetGrid = new SmartGrid(mapped);
                 String mappedFolder = folderPaths.get(sourceGrid.getPaletteFolder());
+                if (!sourceGrid.getPaletteFolder().isEmpty() && mappedFolder == null) {
+                    continue;
+                }
                 targetGrid.setPaletteFolder(mappedFolder == null ? "" : mappedFolder);
                 int insert = target.getSmartGridArray().size();
                 for (int i = 0; i < target.getSmartGridArray().size(); i++) {
@@ -315,11 +331,39 @@ public final class PaletteFolderBundleIO {
     }
 
     private static Map<String, String> importFolders(Tileset source, Tileset target,
-            String sourceRoot, String targetRoot) {
+            String sourceRoot, String targetRoot, Set<Integer> selectedIndices,
+            Map<Integer, Set<String>> selectedFolderPaths) {
         Map<String, String> paths = new HashMap<>();
         String prefix = sourceRoot + "/";
+        Set<String> neededPaths = new LinkedHashSet<>();
+        if (selectedIndices == null) {
+            for (PaletteFolder folder : source.getPaletteFolders()) {
+                neededPaths.add(folder.getPath());
+            }
+        } else {
+            for (int index : selectedIndices) {
+                if (index < 0 || index >= source.size()) {
+                    continue;
+                }
+                Set<String> chosen = selectedFolderPaths == null ? null
+                        : selectedFolderPaths.getOrDefault(index, Collections.emptySet());
+                for (String path : source.get(index).getPaletteFolderSlots().keySet()) {
+                    if (chosen != null && !chosen.contains(path)) {
+                        continue;
+                    }
+                    String ancestor = path;
+                    while (ancestor != null && (ancestor.equals(sourceRoot)
+                            || ancestor.startsWith(prefix))) {
+                        neededPaths.add(ancestor);
+                        ancestor = Tileset.getParentFolderPath(ancestor);
+                    }
+                }
+            }
+        }
         for (PaletteFolder folder : source.getPaletteFolders()) {
-            if (!folder.getPath().equals(sourceRoot) && !folder.getPath().startsWith(prefix)) {
+            if (!neededPaths.contains(folder.getPath())
+                    || (!folder.getPath().equals(sourceRoot)
+                    && !folder.getPath().startsWith(prefix))) {
                 continue;
             }
             String suffix = folder.getPath().substring(sourceRoot.length());

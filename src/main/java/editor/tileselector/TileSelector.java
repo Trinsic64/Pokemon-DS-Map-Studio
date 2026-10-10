@@ -2228,7 +2228,8 @@ public class TileSelector extends JPanel {
 
             PaletteFolderBundleIO.ImportResult result =
                     PaletteFolderBundleIO.readWithChoices(
-                            bundle, handler.getTileset(), selectedIndices, choices);
+                            bundle, handler.getTileset(), selectedIndices, choices,
+                            selectionDialog.getSelectedFolderPaths());
             handler.getMainFrame().renderTilesetThumbnails();
             //Folder imports can add materials after MapDisplay created its GL
             //texture list. Refresh both live displays now; opening the Tile

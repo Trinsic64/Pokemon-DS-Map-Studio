@@ -53,6 +53,7 @@ public final class ImportPaletteFolderDialog extends JDialog {
     private final Tileset target;
     private final Map<Integer, Integer> duplicateIndices;
     private final LinkedHashSet<Integer> included = new LinkedHashSet<>();
+    private final Map<Integer, Set<String>> includedFolders = new LinkedHashMap<>();
     private final DefaultListModel<TileEntry> availableModel = new DefaultListModel<>();
     private final DefaultListModel<TileEntry> includedModel = new DefaultListModel<>();
     private final JList<TileEntry> availableList = new JList<>(availableModel);
@@ -84,6 +85,14 @@ public final class ImportPaletteFolderDialog extends JDialog {
 
     public Set<Integer> getSelectedIndices() {
         return new LinkedHashSet<>(included);
+    }
+
+    public Map<Integer, Set<String>> getSelectedFolderPaths() {
+        Map<Integer, Set<String>> result = new LinkedHashMap<>();
+        for (Map.Entry<Integer, Set<String>> entry : includedFolders.entrySet()) {
+            result.put(entry.getKey(), new LinkedHashSet<>(entry.getValue()));
+        }
+        return result;
     }
 
     /** Returns null when the user cancels the conflict step. */
@@ -175,12 +184,17 @@ public final class ImportPaletteFolderDialog extends JDialog {
         includeFolder.addActionListener(event -> includeCurrentFolder());
         JButton includeAll = new JButton("Include all folders");
         includeAll.addActionListener(event -> {
-            for (int i = 0; i < preview.size(); i++) included.add(i);
+            for (int i = 0; i < preview.size(); i++) {
+                included.add(i);
+                includedFolders.computeIfAbsent(i, key -> new LinkedHashSet<>())
+                        .addAll(preview.get(i).getPaletteFolderSlots().keySet());
+            }
             refreshLists();
         });
         JButton clear = new JButton("Clear included");
         clear.addActionListener(event -> {
             included.clear();
+            includedFolders.clear();
             refreshLists();
         });
         bulk.add(includeFolder);
@@ -260,7 +274,7 @@ public final class ImportPaletteFolderDialog extends JDialog {
 
     private void includeSelected() {
         for (TileEntry entry : availableList.getSelectedValuesList()) {
-            included.add(entry.index);
+            includeInCurrentFolder(entry.index);
         }
         refreshLists();
     }
@@ -268,20 +282,38 @@ public final class ImportPaletteFolderDialog extends JDialog {
     private void excludeSelected() {
         for (TileEntry entry : includedList.getSelectedValuesList()) {
             included.remove(entry.index);
+            includedFolders.remove(entry.index);
         }
         refreshLists();
     }
 
     private void includeCurrentFolder() {
-        for (int index : indicesInCurrentFolder()) included.add(index);
+        for (int index : indicesInCurrentFolder()) includeInCurrentFolder(index);
         refreshLists();
+    }
+
+    private void includeInCurrentFolder(int index) {
+        included.add(index);
+        Set<String> paths = includedFolders.computeIfAbsent(index,
+                key -> new LinkedHashSet<>());
+        if (currentFolder == null || currentFolder.isEmpty()) {
+            paths.addAll(preview.get(index).getPaletteFolderSlots().keySet());
+        } else {
+            paths.add(currentFolder);
+        }
     }
 
     private void refreshLists() {
         availableModel.clear();
         List<Integer> inFolder = indicesInCurrentFolder();
         for (int index : inFolder) {
-            if (!included.contains(index)) availableModel.addElement(new TileEntry(index));
+            Set<String> selectedPaths = includedFolders.get(index);
+            boolean includedHere = currentFolder == null || currentFolder.isEmpty()
+                    ? included.contains(index)
+                    : selectedPaths != null && selectedPaths.contains(currentFolder);
+            if (!includedHere) {
+                availableModel.addElement(new TileEntry(index));
+            }
         }
         includedModel.clear();
         ArrayList<Integer> sorted = new ArrayList<>(included);
